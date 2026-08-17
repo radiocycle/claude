@@ -1,27 +1,22 @@
 # Name: HookUsername
 # Description: хук юзернейма
 # authors: @neistv
-# version: 1.2.2
+# version: 1.3.0
 # meta developer: @latexmods
 # meta banner: https://github.com/neistv/mods/raw/main/assets/banners/HookUsername.png
 
 import asyncio
 import html
-import io
-import ipaddress
 import logging
 import random
 import re
-import socket
 import time
 import unicodedata
 from enum import Enum
-from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
 from telethon.tl import functions
-from telethon.tl.types import InputChatUploadedPhoto
 from herokutl.types import Message
 
 from .. import loader, utils
@@ -47,7 +42,6 @@ class FragmentStatus(Enum):
 
 class GrabStatus(Enum):
     SUCCESS = "success"
-    SUCCESS_AVATAR_FAILED = "success_avatar_failed"
     USERNAME_TAKEN = "username_taken"
     USERNAME_INVALID = "username_invalid"
     USERNAME_PURCHASABLE = "username_purchasable"
@@ -194,11 +188,6 @@ class HookUsernameMod(loader.Module):
             "<tg-emoji emoji-id='5219901967916084166'>💥</tg-emoji> "
             "<b>@{username}</b> успешно занят!\n\nКанал: {channel}"
         ),
-        "grab_success_avatar_failed": (
-            "<tg-emoji emoji-id='5219901967916084166'>💥</tg-emoji> "
-            "<b>@{username}</b> успешно занят!\n\nКанал: {channel}\n\n"
-            "<i>Аватар установить не удалось; юзернейм уже закреплён за каналом.</i>"
-        ),
         "grab_taken": "Юзернейм уже занят. Возможно, его успели забрать после проверки.",
         "grab_invalid": "Telegram отклонил этот юзернейм как недопустимый.",
         "grab_purchasable": "Этот юзернейм доступен только как коллекционный.",
@@ -206,8 +195,8 @@ class HookUsernameMod(loader.Module):
         "grab_public_limit": "Достигнут лимит публичных каналов/юзернеймов аккаунта.",
         "grab_channel_limit": "Достигнут лимит создаваемых каналов аккаунта.",
         "grab_restricted": "Telegram ограничил создание каналов для этого аккаунта.",
-        "grab_bad_title": "Название канала в настройках пустое или недопустимое.",
-        "grab_bad_about": "Описание канала в настройках слишком длинное или недопустимое.",
+        "grab_bad_title": "Telegram отклонил название канала как недопустимое.",
+        "grab_bad_about": "Telegram отклонил описание канала как недопустимое.",
         "grab_no_rights": "Telegram не разрешил изменить созданный канал.",
         "grab_error": (
             "Не удалось занять юзернейм из-за ошибки Telegram. "
@@ -243,32 +232,9 @@ class HookUsernameMod(loader.Module):
     SEARCH_DELAY_MAX = 0.55
 
     FRAGMENT_TIMEOUT = (5, 10)
-    AVATAR_TIMEOUT = (5, 10)
-    AVATAR_MAX_BYTES = 10 * 1024 * 1024
-    AVATAR_MAX_REDIRECTS = 3
     HTTP_USER_AGENT = "Mozilla/5.0 (HookUsername/1.1)"
 
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            loader.ConfigValue(
-                "channel_title",
-                "Этот юзернейм зарезервирован.",
-                "название канала при захвате юзернейма",
-                validator=loader.validators.String(),
-            ),
-            loader.ConfigValue(
-                "channel_about",
-                "",
-                "описание канала при захвате юзернейма",
-                validator=loader.validators.String(),
-            ),
-            loader.ConfigValue(
-                "channel_avatar_url",
-                "https://raw.githubusercontent.com/neistv/mods/main/assets/other/rezerv.png",
-                "ссылка на аватарку канала",
-                validator=loader.validators.String(),
-            ),
-        )
         self._find_running = False
         self._find_stop_event = None
         self._grab_lock = None
@@ -473,126 +439,6 @@ class HookUsernameMod(loader.Module):
     ) -> tuple[FragmentStatus, str | None]:
         return await utils.run_sync(self._check_fragment_sync, username)
 
-    @staticmethod
-    def _detect_image_extension(data: bytes) -> str | None:
-        if data.startswith(b"\xff\xd8\xff"):
-            return ".jpg"
-        if data.startswith(b"\x89PNG\r\n\x1a\n"):
-            return ".png"
-        if data.startswith((b"GIF87a", b"GIF89a")):
-            return ".gif"
-        if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-            return ".webp"
-        return None
-
-    @staticmethod
-    def _ensure_public_http_url(url: str) -> None:
-        parsed = urlparse(url)
-        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("avatar URL must use http or https")
-        if parsed.username or parsed.password:
-            raise ValueError("credentials in avatar URL are not allowed")
-
-        hostname = parsed.hostname.rstrip(".").lower()
-        if hostname == "localhost" or hostname.endswith(".localhost"):
-            raise ValueError("localhost is not allowed")
-
-        try:
-            addresses = socket.getaddrinfo(hostname, parsed.port, type=socket.SOCK_STREAM)
-        except socket.gaierror as error:
-            raise ValueError("avatar hostname cannot be resolved") from error
-
-        if not addresses:
-            raise ValueError("avatar hostname has no addresses")
-
-        for address in addresses:
-            ip = ipaddress.ip_address(address[4][0].split("%", 1)[0])
-            if not ip.is_global:
-                raise ValueError("private, loopback or link-local avatar hosts are not allowed")
-
-    @classmethod
-    def _download_avatar_sync(cls, url: str) -> tuple[bytes, str]:
-        current_url = url
-
-        for redirect_index in range(cls.AVATAR_MAX_REDIRECTS + 1):
-            cls._ensure_public_http_url(current_url)
-
-            with requests.get(
-                current_url,
-                timeout=cls.AVATAR_TIMEOUT,
-                headers={"User-Agent": cls.HTTP_USER_AGENT},
-                allow_redirects=False,
-                stream=True,
-            ) as response:
-                if 300 <= response.status_code < 400:
-                    location = response.headers.get("Location")
-                    if not location:
-                        raise ValueError("avatar redirect has no Location header")
-                    if redirect_index >= cls.AVATAR_MAX_REDIRECTS:
-                        raise ValueError("too many avatar redirects")
-                    current_url = urljoin(current_url, location)
-                    continue
-
-                response.raise_for_status()
-
-                content_type = response.headers.get("Content-Type", "")
-                content_type = content_type.split(";", 1)[0].strip().lower()
-                if content_type and not content_type.startswith("image/"):
-                    raise ValueError("avatar URL does not return an image")
-
-                content_length = response.headers.get("Content-Length")
-                if content_length:
-                    try:
-                        declared_size = int(content_length)
-                    except ValueError:
-                        declared_size = 0
-                    if declared_size > cls.AVATAR_MAX_BYTES:
-                        raise ValueError("avatar is too large")
-
-                data = bytearray()
-                for chunk in response.iter_content(chunk_size=64 * 1024):
-                    if not chunk:
-                        continue
-                    data.extend(chunk)
-                    if len(data) > cls.AVATAR_MAX_BYTES:
-                        raise ValueError("avatar is too large")
-
-            if not data:
-                raise ValueError("avatar response is empty")
-
-            image_data = bytes(data)
-            extension = cls._detect_image_extension(image_data)
-            if extension is None:
-                raise ValueError("avatar data is not a supported image")
-
-            return image_data, extension
-
-        raise ValueError("too many avatar redirects")
-
-    async def _set_channel_avatar(self, channel) -> bool:
-        avatar_url = str(self.config["channel_avatar_url"] or "").strip()
-        if not avatar_url:
-            return True
-
-        try:
-            image_data, extension = await utils.run_sync(
-                self._download_avatar_sync,
-                avatar_url,
-            )
-            buffer = io.BytesIO(image_data)
-            buffer.name = f"avatar{extension}"
-            uploaded = await self._client.upload_file(buffer)
-            await self._client(
-                functions.channels.EditPhotoRequest(
-                    channel=channel,
-                    photo=InputChatUploadedPhoto(file=uploaded),
-                )
-            )
-            return True
-        except Exception:
-            logger.exception("Не удалось установить аватар канала")
-            return False
-
     async def _cleanup_service_messages(self, channel) -> None:
         try:
             async for message in self._client.iter_messages(channel, limit=10):
@@ -625,16 +471,11 @@ class HookUsernameMod(loader.Module):
     ) -> tuple[GrabStatus, str | int | None, bool]:
         channel = None
 
-        title = str(self.config["channel_title"] or "")
-        about = str(self.config["channel_about"] or "")
-        if not title.strip():
-            return GrabStatus.BAD_TITLE, None, False
-
         try:
             result = await self._client(
                 functions.channels.CreateChannelRequest(
-                    title=title,
-                    about=about,
+                    title=f"@{username}",
+                    about="",
                     broadcast=True,
                     megagroup=False,
                 )
@@ -673,15 +514,9 @@ class HookUsernameMod(loader.Module):
 
             return status, detail, rollback_failed
 
-        avatar_ok = await self._set_channel_avatar(channel)
         await self._cleanup_service_messages(channel)
 
-        status = (
-            GrabStatus.SUCCESS
-            if avatar_ok
-            else GrabStatus.SUCCESS_AVATAR_FAILED
-        )
-        return status, f"t.me/{username}", False
+        return GrabStatus.SUCCESS, f"t.me/{username}", False
 
     def _generate_variants(self, prefix: str) -> list[str]:
         """Генерирует до MAX_PREFIX_CANDIDATES вариантов по префиксу."""
@@ -1538,14 +1373,9 @@ class HookUsernameMod(loader.Module):
             status, info, rollback_failed = await self._grab_username(username)
             safe_username = html.escape(username, quote=True)
 
-            if status in {GrabStatus.SUCCESS, GrabStatus.SUCCESS_AVATAR_FAILED}:
+            if status is GrabStatus.SUCCESS:
                 safe_channel = html.escape(str(info), quote=True)
-                key = (
-                    "grab_success"
-                    if status is GrabStatus.SUCCESS
-                    else "grab_success_avatar_failed"
-                )
-                text = self.strings[key].format(
+                text = self.strings["grab_success"].format(
                     username=safe_username,
                     channel=safe_channel,
                 )
