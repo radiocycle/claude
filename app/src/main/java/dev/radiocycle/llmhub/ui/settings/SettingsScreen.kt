@@ -555,7 +555,7 @@ fun SettingsScreen(
 
             Section("About")
             Text(
-                "LLM Hub — one interface over OpenAI, Anthropic, Google and any compatible endpoint, " +
+                "LLM Hub v1.1.0 — one interface over OpenAI, Anthropic, Google and any compatible endpoint, " +
                     "with automatic failover and built-in tools. Keys are stored in this app's private " +
                     "storage and are only ever sent to the provider they belong to.",
                 style = MaterialTheme.typography.bodySmall,

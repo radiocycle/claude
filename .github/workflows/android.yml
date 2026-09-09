@@ -52,13 +52,15 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/llmhub-debug.apk 2>/dev/null || cp app/build/outputs/apk/debug/*.apk app/build/outputs/apk/debug/llmhub-debug.apk
+          VERSION=$(grep -m1 'versionName' app/build.gradle.kts | cut -d '"' -f2)
+          echo "APP_VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: Publish Debug APK to GitHub Releases
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v1.0-build-${{ github.run_number }}"
-          name: "Debug Build #${{ github.run_number }} (${{ github.ref_name }})"
+          tag_name: "v${{ env.APP_VERSION }}-build-${{ github.run_number }}"
+          name: "LLMHub Android v${{ env.APP_VERSION }} (Build #${{ github.run_number }})"
           body: |
             ### Automated CI Build
             * **Branch**: `${{ github.ref_name }}`
