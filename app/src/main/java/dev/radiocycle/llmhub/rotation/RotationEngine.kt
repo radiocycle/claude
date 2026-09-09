@@ -84,13 +84,13 @@ class RotationEngine(
         var attempt = 0
         var budgetSpent = 0
         var lastEndpoint: Endpoint? = null
-        var lastError: String? = null
+        var lastError = ""
         var credentialFailures = 0
 
         while (true) {
             val endpoint = pick(pool, tried, pinnedProviderId, config)
             if (endpoint == null) {
-                lastError = lastError ?: "Every provider is unavailable or cooling down."
+                if (lastError.isEmpty()) lastError = "Every provider is unavailable or cooling down."
                 break
             }
             tried += endpoint.id
@@ -113,7 +113,7 @@ class RotationEngine(
                     RotationEvent.Switched(
                         from = previous.provider,
                         to = provider,
-                        reason = lastError.orEmpty(),
+                        reason = lastError,
                         resumed = partial.isNotEmpty(),
                     )
                 )
@@ -181,15 +181,10 @@ class RotationEngine(
 
         emit(
             RotationEvent.Failed(
-                buildString {
-                    if (credentialFailures > 0 && credentialFailures == attempt) {
-                        append("All $attempt key(s) in the pool were rejected. Last: ")
-                        append(lastError.orEmpty())
-                    } else if (lastError != null) {
-                        append("All $attempt attempt(s) failed. Last: $lastError")
-                    } else {
-                        append("No provider could serve this request.")
-                    }
+                if (credentialFailures > 0 && credentialFailures == attempt) {
+                    "All $attempt key(s) in the pool were rejected. Last: $lastError"
+                } else {
+                    "All $attempt attempt(s) failed. Last: $lastError"
                 },
                 attempt,
             )
