@@ -47,6 +47,20 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         _draft.value = _draft.value?.let(transform)
     }
 
+    fun addKeysToDraft(newKeys: List<String>, append: Boolean) {
+        val draft = _draft.value ?: return
+        val existing = if (append) draft.keys else emptyList()
+        val combined = (existing + newKeys).distinct()
+        _draft.value = draft.copy(apiKey = combined.joinToString("\n"))
+    }
+
+    fun addKeysToProvider(providerId: String, newKeys: List<String>, append: Boolean) {
+        val provider = container.providers.byId(providerId) ?: return
+        val existing = if (append) provider.keys else emptyList()
+        val combined = (existing + newKeys).distinct()
+        container.providers.upsert(provider.copy(apiKey = combined.joinToString("\n")))
+    }
+
     fun saveDraft(): Boolean {
         val draft = _draft.value ?: return false
         if (draft.name.isBlank() || draft.baseUrl.isBlank()) return false

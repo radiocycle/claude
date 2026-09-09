@@ -12,14 +12,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,8 +40,11 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.platform.LocalContext
+import dev.radiocycle.llmhub.data.model.KeyParser
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +69,46 @@ fun ProviderEditScreen(viewModel: ProvidersViewModel, onClose: () -> Unit) {
     val provider = draft ?: return
     var keyVisible by remember { mutableStateOf(false) }
     var modelsText by remember(provider.id) { mutableStateOf(provider.models.joinToString("\n")) }
+
+    val context = LocalContext.current
+    var pendingImportKeys by remember { mutableStateOf<List<String>?>(null) }
+    var importFeedback by remember { mutableStateOf<String?>(null) }
+    var importError by remember { mutableStateOf<String?>(null) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val content = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val buffer = CharArray(1024 * 1024 * 2)
+                val read = stream.bufferedReader(Charsets.UTF_8).read(buffer)
+                if (read > 0) String(buffer, 0, read) else ""
+            }
+        }.getOrNull()
+
+        if (content.isNullOrBlank()) {
+            importError = "The selected file is empty or could not be read"
+            return@rememberLauncherForActivityResult
+        }
+        if (content.contains('\u0000')) {
+            importError = "The selected file appears to be binary, not text"
+            return@rememberLauncherForActivityResult
+        }
+
+        val keys = KeyParser.parse(content)
+        if (keys.isEmpty()) {
+            importError = "No valid keys found in file. Ensure keys are on separate lines or comma-separated."
+            return@rememberLauncherForActivityResult
+        }
+
+        if (provider.keys.isEmpty()) {
+            viewModel.addKeysToDraft(keys, append = false)
+            importFeedback = "Imported ${keys.size} keys"
+        } else {
+            pendingImportKeys = keys
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -154,6 +201,24 @@ fun ProviderEditScreen(viewModel: ProvidersViewModel, onClose: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(onClick = { filePickerLauncher.launch(arrayOf("*/*")) }) {
+                    Icon(Icons.Rounded.FileUpload, contentDescription = null, Modifier.size(18.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text("Bulk add keys from file")
+                }
+                importFeedback?.let { msg ->
+                    Text(
+                        text = msg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+            }
 
             SectionLabel("Custom headers")
             provider.headers.forEachIndexed { index, entry ->
@@ -300,6 +365,63 @@ fun ProviderEditScreen(viewModel: ProvidersViewModel, onClose: () -> Unit) {
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    pendingImportKeys?.let { importedKeys ->
+        AlertDialog(
+            onDismissRequest = { pendingImportKeys = null },
+            title = { Text("Import ${importedKeys.size} keys") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Found ${importedKeys.size} keys in file.")
+                    Text(
+                        "Current key pool has ${provider.keys.size} keys. Would you like to append or replace?",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = "Preview: " + importedKeys.take(2).joinToString {
+                            if (it.length > 10) it.take(4) + "…" + it.takeLast(4) else it
+                        } + if (importedKeys.size > 2) " (+${importedKeys.size - 2} more)" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.addKeysToDraft(importedKeys, append = true)
+                    importFeedback = "Appended ${importedKeys.size} keys"
+                    pendingImportKeys = null
+                }) {
+                    Text("Append")
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { pendingImportKeys = null }) {
+                        Text("Cancel")
+                    }
+                    TextButton(onClick = {
+                        viewModel.addKeysToDraft(importedKeys, append = false)
+                        importFeedback = "Set to ${importedKeys.size} keys"
+                        pendingImportKeys = null
+                    }) {
+                        Text("Replace")
+                    }
+                }
+            },
+        )
+    }
+
+    importError?.let { err ->
+        AlertDialog(
+            onDismissRequest = { importError = null },
+            title = { Text("Import failed") },
+            text = { Text(err) },
+            confirmButton = {
+                TextButton(onClick = { importError = null }) { Text("OK") }
+            },
+        )
     }
 }
 

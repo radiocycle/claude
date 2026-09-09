@@ -1,7 +1,10 @@
 package dev.radiocycle.llmhub.data.model
 
+import dev.radiocycle.llmhub.core.AppJson
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
 
 /** Wire protocol a provider speaks. Everything else (auth header, path, body) follows from it. */
@@ -53,9 +56,7 @@ data class Provider(
 ) {
     /** The key pool, in rotation order. Empty for endpoints that need no credential. */
     val keys: List<String>
-        get() = apiKey.split(',', ';', '\n')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
+        get() = KeyParser.parse(apiKey)
 
     /**
      * How many distinct credentials this provider can be tried with. A provider with no key still
@@ -140,3 +141,61 @@ data class Endpoint(
             }
         }
 }
+
+/**
+ * Utility for parsing API keys from file contents or user input.
+ * Supports:
+ * - One key per line
+ * - Comma-separated and semicolon-separated keys
+ * - JSON arrays of strings: `["key1", "key2"]`
+ * - Key-value / env format: `API_KEY=key1`
+ * - Strips whitespace and quotes (", ', `)
+ * - Ignores comments (# or //) and empty entries
+ * - Deduplicates while preserving order
+ */
+object KeyParser {
+
+    fun parse(content: String): List<String> {
+        val trimmed = content.trim()
+        if (trimmed.isEmpty()) return emptyList()
+
+        // 1. JSON array of strings: ["key1", "key2", ...]
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            val jsonKeys = runCatching {
+                AppJson.parseToJsonElement(trimmed).jsonArray.mapNotNull { element ->
+                    runCatching {
+                        element.jsonPrimitive.content.trim().trim('"', '\'', '`')
+                    }.getOrNull()?.takeIf { it.isNotEmpty() }
+                }
+            }.getOrNull()
+            if (!jsonKeys.isNullOrEmpty()) {
+                return jsonKeys.distinct()
+            }
+        }
+
+        // 2. Line-by-line / delimiter-based
+        return trimmed.lineSequence()
+            .map { it.trim() }
+            .filter { line ->
+                line.isNotEmpty() && !line.startsWith('#') && !line.startsWith("//")
+            }
+            .map { line ->
+                // Support env-style lines like OPENAI_API_KEY=sk-...
+                if (line.contains('=') && !line.startsWith("sk-")) {
+                    line.substringAfter('=').trim()
+                } else {
+                    line
+                }
+            }
+            .flatMap { line ->
+                line.split(',', ';').asSequence()
+            }
+            .map { key ->
+                key.trim().trim('"', '\'', '`')
+            }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .toList()
+    }
+}
+

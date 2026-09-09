@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -24,9 +26,13 @@ import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.ui.platform.LocalContext
+import dev.radiocycle.llmhub.data.model.KeyParser
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,6 +67,52 @@ fun ProvidersScreen(viewModel: ProvidersViewModel, onEdit: () -> Unit) {
     val health by viewModel.health.collectAsStateWithLifecycle()
     var showPresets by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Provider?>(null) }
+    var pendingImportForProvider by remember { mutableStateOf<Provider?>(null) }
+    var pendingImportKeys by remember { mutableStateOf<List<String>?>(null) }
+    var importError by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        val target = pendingImportForProvider ?: return@rememberLauncherForActivityResult
+        if (uri == null) {
+            pendingImportForProvider = null
+            return@rememberLauncherForActivityResult
+        }
+        val content = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val buffer = CharArray(1024 * 1024 * 2)
+                val read = stream.bufferedReader(Charsets.UTF_8).read(buffer)
+                if (read > 0) String(buffer, 0, read) else ""
+            }
+        }.getOrNull()
+
+        if (content.isNullOrBlank()) {
+            importError = "The selected file is empty or could not be read"
+            pendingImportForProvider = null
+            return@rememberLauncherForActivityResult
+        }
+        if (content.contains('\u0000')) {
+            importError = "The selected file appears to be binary, not text"
+            pendingImportForProvider = null
+            return@rememberLauncherForActivityResult
+        }
+
+        val keys = KeyParser.parse(content)
+        if (keys.isEmpty()) {
+            importError = "No valid keys found in file. Ensure keys are on separate lines or comma-separated."
+            pendingImportForProvider = null
+            return@rememberLauncherForActivityResult
+        }
+
+        if (target.keys.isEmpty()) {
+            viewModel.addKeysToProvider(target.id, keys, append = false)
+            pendingImportForProvider = null
+        } else {
+            pendingImportKeys = keys
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -126,6 +178,10 @@ fun ProvidersScreen(viewModel: ProvidersViewModel, onEdit: () -> Unit) {
                         onDelete = { pendingDelete = provider },
                         onMoveUp = { viewModel.move(provider.id, -1) },
                         onMoveDown = { viewModel.move(provider.id, +1) },
+                        onImportKeys = {
+                            pendingImportForProvider = provider
+                            filePickerLauncher.launch(arrayOf("*/*"))
+                        },
                     )
                 }
             }
@@ -186,6 +242,72 @@ fun ProvidersScreen(viewModel: ProvidersViewModel, onEdit: () -> Unit) {
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
         )
     }
+
+    pendingImportKeys?.let { importedKeys ->
+        val target = pendingImportForProvider
+        if (target != null) {
+            AlertDialog(
+                onDismissRequest = {
+                    pendingImportKeys = null
+                    pendingImportForProvider = null
+                },
+                title = { Text("Import ${importedKeys.size} keys to ${target.name}") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Found ${importedKeys.size} keys in file.")
+                        Text(
+                            "Current key pool has ${target.keys.size} keys. Would you like to append or replace?",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "Preview: " + importedKeys.take(2).joinToString {
+                                if (it.length > 10) it.take(4) + "…" + it.takeLast(4) else it
+                            } + if (importedKeys.size > 2) " (+${importedKeys.size - 2} more)" else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        viewModel.addKeysToProvider(target.id, importedKeys, append = true)
+                        pendingImportKeys = null
+                        pendingImportForProvider = null
+                    }) {
+                        Text("Append")
+                    }
+                },
+                dismissButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            pendingImportKeys = null
+                            pendingImportForProvider = null
+                        }) {
+                            Text("Cancel")
+                        }
+                        TextButton(onClick = {
+                            viewModel.addKeysToProvider(target.id, importedKeys, append = false)
+                            pendingImportKeys = null
+                            pendingImportForProvider = null
+                        }) {
+                            Text("Replace")
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    importError?.let { err ->
+        AlertDialog(
+            onDismissRequest = { importError = null },
+            title = { Text("Import error") },
+            text = { Text(err) },
+            confirmButton = {
+                TextButton(onClick = { importError = null }) { Text("OK") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -197,6 +319,7 @@ private fun ProviderCard(
     onDelete: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
+    onImportKeys: () -> Unit,
 ) {
     Surface(
         shape = RoundedCornerShape(24.dp),
@@ -231,6 +354,9 @@ private fun ProviderCard(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                IconButton(onClick = onImportKeys) {
+                    Icon(Icons.Rounded.FileUpload, contentDescription = "Import keys from file", Modifier.size(18.dp))
+                }
                 IconButton(onClick = onMoveUp) {
                     Icon(Icons.Rounded.ArrowUpward, contentDescription = "Move up", Modifier.size(18.dp))
                 }
