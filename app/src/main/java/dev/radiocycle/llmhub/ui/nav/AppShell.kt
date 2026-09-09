@@ -95,7 +95,10 @@ fun AppShell(container: AppContainer) {
                         onEdit = { editingProvider = true },
                     )
 
-                    Tab.SETTINGS -> SettingsScreen(repository = container.settings)
+                    Tab.SETTINGS -> SettingsScreen(
+                        repository = container.settings,
+                        workspace = container.workspace,
+                    )
                 }
             }
         }

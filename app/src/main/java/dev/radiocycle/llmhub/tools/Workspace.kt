@@ -67,37 +67,64 @@ class WorkspaceManager(
     }.getOrDefault(file.path)
 }
 
-/** Detects and caches whether `su` is available and grants a shell. */
+/**
+ * Detects and caches root access, and the exact `su` invocation that works on this device.
+ *
+ * Root commands are run through mount-master (`su -mm`) so that filesystem changes land in the
+ * global mount namespace — on MIUI / HyperOS (Xiaomi) an ordinary `su -c` runs in an isolated
+ * namespace where mounts and some writes are invisible to the rest of the system. Not every root
+ * solution accepts `-mm`, so the probe tries it first and falls back to plain `su -c`, caching
+ * whichever prefix actually opened a root shell.
+ */
 object RootAccess {
-    @Volatile private var cached: Boolean? = null
+    @Volatile private var probed = false
+    @Volatile private var prefix: List<String>? = null
+
+    /** Candidate `su` command prefixes, mount-master first. */
+    private val CANDIDATES = listOf(
+        listOf("su", "-mm", "-c"),
+        listOf("su", "--mount-master", "-c"),
+        listOf("su", "-c"),
+    )
 
     /** True when a `su` binary sits on a known path — a cheap check that never prompts. */
     fun binaryPresent(): Boolean = SU_PATHS.any { File(it).exists() }
 
     /**
-     * Actually tries to open a root shell (this is what may show the superuser prompt). Result is
-     * cached so the prompt appears at most once per process.
+     * The `su` command prefix that works, or null if root is unavailable. The first call may show
+     * the superuser prompt; the result is cached so it appears at most once per process.
      */
     @Synchronized
-    fun isGranted(): Boolean {
-        cached?.let { return it }
-        val granted = runCatching {
-            val process = ProcessBuilder("su", "-c", "id -u").redirectErrorStream(true).start()
-            val finished = process.waitFor(6, TimeUnit.SECONDS)
-            if (!finished) {
-                process.destroy()
-                false
-            } else {
-                val output = process.inputStream.bufferedReader().readText().trim()
-                process.exitValue() == 0 && output.contains("0")
-            }
-        }.getOrDefault(false)
-        cached = granted
-        return granted
+    fun commandPrefix(): List<String>? {
+        if (probed) return prefix
+        probed = true
+        prefix = CANDIDATES.firstOrNull { tryPrefix(it) }
+        return prefix
     }
 
+    /** Whether root is granted at all. */
+    fun isGranted(): Boolean = commandPrefix() != null
+
+    /** Human-readable description of the resolved invocation, for the settings screen. */
+    fun modeLabel(): String? = commandPrefix()?.let { p ->
+        if ("-mm" in p || "--mount-master" in p) "su (mount master)" else "su"
+    }
+
+    private fun tryPrefix(prefix: List<String>): Boolean = runCatching {
+        val process = ProcessBuilder(prefix + "id -u").redirectErrorStream(true).start()
+        val finished = process.waitFor(6, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+            false
+        } else {
+            val output = process.inputStream.bufferedReader().readText().trim()
+            process.exitValue() == 0 && output.contains("0")
+        }
+    }.getOrDefault(false)
+
     fun invalidate() {
-        cached = null
+        probed = false
+        prefix = null
     }
 
     private val SU_PATHS = listOf(

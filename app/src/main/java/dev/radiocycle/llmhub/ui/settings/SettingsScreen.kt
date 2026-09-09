@@ -350,9 +350,9 @@ fun SettingsScreen(repository: SettingsRepository, workspace: WorkspaceManager) 
                 title = "Run shell as root",
                 subtitle = when {
                     !RootAccess.binaryPresent() -> "No su binary found — device does not appear rooted"
-                    rootState == true -> "Root granted — shell runs with su"
+                    rootState == true -> "Root granted — shell runs with ${RootAccess.modeLabel() ?: "su"}"
                     rootState == false -> "su present but access was denied"
-                    else -> "Use su so the shell reaches the whole filesystem"
+                    else -> "Use su (mount master) so writes land in the global namespace"
                 },
                 checked = settings.tools.shellUseRoot,
                 onChange = { enabled ->

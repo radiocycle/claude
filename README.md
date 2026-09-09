@@ -96,8 +96,10 @@ anywhere.
   confined agent cannot escape its directory.
 - `shell` runs a command line in the workspace and returns combined stdout/stderr and the exit
   code. Android ships a POSIX shell, so `ls`, `cat`, `grep`, `find` and pipelines work in the app's
-  own sandbox. Turn on **Run shell as root** and, on a rooted device, commands run through `su` with
-  full-filesystem reach; the toggle shows whether a `su` grant is actually available. State does not
+  own sandbox. Turn on **Run shell as root** and, on a rooted device, commands run through `su -mm`
+  (mount master) so writes land in the global mount namespace — required on MIUI / HyperOS, where a
+  plain `su` runs in an isolated namespace. Root solutions that don't accept `-mm` fall back to
+  plain `su -c` automatically; the toggle shows which mode was resolved. State does not
   carry between calls, so steps are chained with `&&` inside one command. The shell is off by
   default — it runs real commands on the device.
 

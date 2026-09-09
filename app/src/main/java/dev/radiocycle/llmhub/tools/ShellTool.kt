@@ -46,19 +46,20 @@ class ShellTool(
         }.getOrElse { return@withContext ToolOutcome(it.message ?: "bad cwd", isError = true) }
 
         val wantRoot = toolSettings.shellUseRoot
-        val rooted = wantRoot && RootAccess.isGranted()
-        if (wantRoot && !rooted) {
+        val rootPrefix = if (wantRoot) RootAccess.commandPrefix() else null
+        if (wantRoot && rootPrefix == null) {
             return@withContext ToolOutcome(
-                "Root requested but unavailable — no `su` grant. Running without root is off; enable " +
-                    "or grant root in your superuser app.",
+                "Root requested but unavailable — no `su` grant. Grant root in your superuser app, " +
+                    "or turn off \"run shell as root\".",
                 isError = true,
             )
         }
 
         // `cd` first so root shells (whose default cwd is /) still start in the workspace.
         val script = "cd ${shellQuote(workingDir.absolutePath)} && ($command)"
-        val builder = if (rooted) {
-            ProcessBuilder("su", "-c", script)
+        val builder = if (rootPrefix != null) {
+            // e.g. su -mm -c "<script>" — mount master so writes land in the global namespace.
+            ProcessBuilder(rootPrefix + script)
         } else {
             ProcessBuilder("/system/bin/sh", "-c", script).directory(workingDir)
         }.redirectErrorStream(true)
@@ -83,13 +84,13 @@ class ShellTool(
                 process.destroyForcibly()
                 readerThread.join(500)
                 return@runCatching ToolOutcome(
-                    render(rooted, workingDir, output, exit = null, timedOut = timeout),
+                    render(rootPrefix != null, workingDir, output, exit = null, timedOut = timeout),
                     isError = true,
                 )
             }
             readerThread.join(1000)
             val exit = process.exitValue()
-            ToolOutcome(render(rooted, workingDir, output, exit, timedOut = null), isError = exit != 0)
+            ToolOutcome(render(rootPrefix != null, workingDir, output, exit, timedOut = null), isError = exit != 0)
         }.getOrElse { ToolOutcome("shell failed: ${it.message}", isError = true) }
     }
 
@@ -100,7 +101,7 @@ class ShellTool(
         exit: Int?,
         timedOut: Long?,
     ): String = buildString {
-        append(if (rooted) "# su" else "# sh")
+        append(if (rooted) "# " + (RootAccess.modeLabel() ?: "su") else "# sh")
         append(" @ ").append(workspace.label(cwd))
         when {
             timedOut != null -> append("  · timed out after ${timedOut}ms")
