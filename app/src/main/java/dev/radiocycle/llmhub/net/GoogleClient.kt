@@ -2,6 +2,8 @@ package dev.radiocycle.llmhub.net
 
 import dev.radiocycle.llmhub.core.AppJson
 import dev.radiocycle.llmhub.data.model.Endpoint
+import dev.radiocycle.llmhub.data.model.Provider
+import dev.radiocycle.llmhub.data.model.ReasoningEffort
 import dev.radiocycle.llmhub.data.model.Role
 import dev.radiocycle.llmhub.data.model.TokenUsage
 import dev.radiocycle.llmhub.data.model.ToolCall
@@ -37,7 +39,7 @@ class GoogleClient : LlmClient {
         val provider = endpoint.provider
         val model = request.model.removePrefix("models/")
         val url = "${provider.baseUrl.trimBaseUrl()}/v1beta/models/$model:streamGenerateContent?alt=sse"
-        val payload = buildPayload(request)
+        val payload = buildPayload(provider, request)
         val call = Http.withTimeout(provider.timeoutSeconds).newCall(
             Request.Builder()
                 .url(url)
@@ -143,7 +145,7 @@ class GoogleClient : LlmClient {
         }
     }
 
-    private fun buildPayload(request: ChatRequest): JsonObject = buildJsonObject {
+    private fun buildPayload(provider: Provider, request: ChatRequest): JsonObject = buildJsonObject {
         put("contents", buildContents(request))
         val system = buildString {
             request.system?.takeIf { it.isNotBlank() }?.let { append(it) }
@@ -160,6 +162,13 @@ class GoogleClient : LlmClient {
         putJsonObject("generationConfig") {
             put("temperature", request.temperature)
             put("maxOutputTokens", request.maxTokens)
+            when (provider.reasoningEffort) {
+                ReasoningEffort.NONE -> putJsonObject("thinkingConfig") { put("thinkingBudget", 0) }
+                ReasoningEffort.LOW -> putJsonObject("thinkingConfig") { put("thinkingBudget", 1024) }
+                ReasoningEffort.MEDIUM -> putJsonObject("thinkingConfig") { put("thinkingBudget", 2048) }
+                ReasoningEffort.HIGH -> putJsonObject("thinkingConfig") { put("thinkingBudget", 4096) }
+                ReasoningEffort.DEFAULT -> Unit
+            }
         }
         if (request.tools.isNotEmpty()) {
             putJsonArray("tools") {

@@ -60,6 +60,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.radiocycle.llmhub.data.model.ApiMode
 import dev.radiocycle.llmhub.data.model.HeaderEntry
+import dev.radiocycle.llmhub.data.model.OpenAiMode
+import dev.radiocycle.llmhub.data.model.ReasoningEffort
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -154,13 +156,38 @@ fun ProviderEditScreen(viewModel: ProvidersViewModel, onClose: () -> Unit) {
             }
             Text(
                 text = when (provider.apiMode) {
-                    ApiMode.OPENAI -> "POST {base}/chat/completions · Authorization: Bearer <key>"
+                    ApiMode.OPENAI -> if (provider.openAiMode == OpenAiMode.WIRE) {
+                        "POST {base}/chat/completions · Authorization: Bearer <key>"
+                    } else {
+                        "POST {base}/responses · Authorization: Bearer <key>"
+                    }
                     ApiMode.ANTHROPIC -> "POST {base}/v1/messages · x-api-key + anthropic-version"
                     ApiMode.GOOGLE -> "POST {base}/v1beta/models/{model}:streamGenerateContent · x-goog-api-key"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            if (provider.apiMode == ApiMode.OPENAI) {
+                SectionLabel("OpenAI endpoint mode")
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    OpenAiMode.entries.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = provider.openAiMode == mode,
+                            onClick = { viewModel.editDraft { it.copy(openAiMode = mode) } },
+                            shape = SegmentedButtonDefaults.itemShape(index, OpenAiMode.entries.size),
+                        ) { Text(mode.shortLabel) }
+                    }
+                }
+                Text(
+                    text = when (provider.openAiMode) {
+                        OpenAiMode.WIRE -> "Wire: POST {base}/chat/completions (standard Chat Completions format)"
+                        OpenAiMode.RESPONSES -> "Responses: POST {base}/responses (OpenAI Responses API format)"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             OutlinedTextField(
                 value = provider.baseUrl,
@@ -321,6 +348,34 @@ fun ProviderEditScreen(viewModel: ProvidersViewModel, onClose: () -> Unit) {
                 subtitle = "Send tool definitions to this endpoint",
                 checked = provider.supportsTools,
                 onChange = { supports -> viewModel.editDraft { it.copy(supportsTools = supports) } },
+            )
+
+            SectionLabel("Reasoning effort")
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                ReasoningEffort.entries.forEachIndexed { index, effort ->
+                    SegmentedButton(
+                        selected = provider.reasoningEffort == effort,
+                        onClick = { viewModel.editDraft { it.copy(reasoningEffort = effort) } },
+                        shape = SegmentedButtonDefaults.itemShape(index, ReasoningEffort.entries.size),
+                    ) {
+                        Text(
+                            effort.label,
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
+            }
+            Text(
+                text = when (provider.reasoningEffort) {
+                    ReasoningEffort.DEFAULT -> "Default: Do not pass effort parameter (provider defaults apply)"
+                    ReasoningEffort.NONE -> "None: Explicitly disable reasoning / thinking"
+                    ReasoningEffort.LOW -> "Low: Minimal reasoning effort / thinking budget"
+                    ReasoningEffort.MEDIUM -> "Medium: Standard reasoning effort / thinking budget"
+                    ReasoningEffort.HIGH -> "High: Maximum reasoning effort / thinking budget"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -3,6 +3,8 @@ package dev.radiocycle.llmhub.net
 import dev.radiocycle.llmhub.core.AppJson
 import dev.radiocycle.llmhub.data.model.ChatMessage
 import dev.radiocycle.llmhub.data.model.Endpoint
+import dev.radiocycle.llmhub.data.model.Provider
+import dev.radiocycle.llmhub.data.model.ReasoningEffort
 import dev.radiocycle.llmhub.data.model.Role
 import dev.radiocycle.llmhub.data.model.TokenUsage
 import dev.radiocycle.llmhub.data.model.ToolCall
@@ -35,7 +37,7 @@ class AnthropicClient : LlmClient {
     override fun stream(endpoint: Endpoint, request: ChatRequest): Flow<StreamEvent> = flow {
         val provider = endpoint.provider
         val url = "${provider.baseUrl.trimBaseUrl()}/v1/messages"
-        val payload = buildPayload(request)
+        val payload = buildPayload(provider, request)
         val call = Http.withTimeout(provider.timeoutSeconds).newCall(
             Request.Builder()
                 .url(url)
@@ -163,13 +165,42 @@ class AnthropicClient : LlmClient {
         }
     }
 
-    private fun buildPayload(request: ChatRequest): JsonObject = buildJsonObject {
+    private fun buildPayload(provider: Provider, request: ChatRequest): JsonObject = buildJsonObject {
         put("model", request.model)
         put("max_tokens", request.maxTokens)
-        put("temperature", request.temperature.coerceIn(0f, 1f))
         put("stream", true)
         request.system?.takeIf { it.isNotBlank() }?.let { put("system", it) }
         put("messages", buildMessages(request))
+
+        if (provider.reasoningEffort != ReasoningEffort.DEFAULT) {
+            when (provider.reasoningEffort) {
+                ReasoningEffort.NONE -> putJsonObject("thinking") { put("type", "disabled") }
+                ReasoningEffort.LOW -> {
+                    putJsonObject("thinking") {
+                        put("type", "enabled")
+                        put("budget_tokens", 1024)
+                    }
+                    put("temperature", 1.0f)
+                }
+                ReasoningEffort.MEDIUM -> {
+                    putJsonObject("thinking") {
+                        put("type", "enabled")
+                        put("budget_tokens", 2048)
+                    }
+                    put("temperature", 1.0f)
+                }
+                ReasoningEffort.HIGH -> {
+                    putJsonObject("thinking") {
+                        put("type", "enabled")
+                        put("budget_tokens", 4096)
+                    }
+                    put("temperature", 1.0f)
+                }
+                else -> put("temperature", request.temperature.coerceIn(0f, 1f))
+            }
+        } else {
+            put("temperature", request.temperature.coerceIn(0f, 1f))
+        }
         if (request.tools.isNotEmpty()) {
             putJsonArray("tools") {
                 request.tools.forEach { tool ->

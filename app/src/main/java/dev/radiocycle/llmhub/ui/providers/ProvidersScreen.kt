@@ -55,10 +55,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.radiocycle.llmhub.data.model.ApiMode
 import dev.radiocycle.llmhub.data.model.BuiltInPresets
 import dev.radiocycle.llmhub.data.model.Endpoint
 import dev.radiocycle.llmhub.data.model.EndpointHealth
 import dev.radiocycle.llmhub.data.model.Provider
+import dev.radiocycle.llmhub.data.model.ReasoningEffort
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -333,7 +335,15 @@ private fun ProviderCard(
                     Text(provider.name.ifBlank { "Unnamed" }, style = MaterialTheme.typography.titleMedium)
                     Text(
                         text = buildString {
-                            append(provider.apiMode.label)
+                            if (provider.apiMode == ApiMode.OPENAI) {
+                                append("OpenAI (${provider.openAiMode.shortLabel})")
+                            } else {
+                                append(provider.apiMode.label)
+                            }
+                            if (provider.reasoningEffort != ReasoningEffort.DEFAULT) {
+                                append(" · effort: ")
+                                append(provider.reasoningEffort.label.lowercase())
+                            }
                             append(" · ")
                             append(provider.baseUrl.ifBlank { "no base URL" })
                         },

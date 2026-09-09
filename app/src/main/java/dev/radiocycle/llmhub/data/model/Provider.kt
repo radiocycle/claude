@@ -22,6 +22,53 @@ enum class ApiMode {
         }
 }
 
+/** Dialect / endpoint flavor for OpenAI (+compatible) endpoints. */
+@Serializable
+enum class OpenAiMode {
+    @SerialName("wire") WIRE,
+    @SerialName("responses") RESPONSES;
+
+    val label: String
+        get() = when (this) {
+            WIRE -> "Wire (/chat/completions)"
+            RESPONSES -> "Responses (/responses)"
+        }
+
+    val shortLabel: String
+        get() = when (this) {
+            WIRE -> "Wire"
+            RESPONSES -> "Responses"
+        }
+}
+
+/** Reasoning effort for reasoning models across providers. */
+@Serializable
+enum class ReasoningEffort {
+    @SerialName("default") DEFAULT,
+    @SerialName("none") NONE,
+    @SerialName("low") LOW,
+    @SerialName("medium") MEDIUM,
+    @SerialName("high") HIGH;
+
+    val label: String
+        get() = when (this) {
+            DEFAULT -> "Default"
+            NONE -> "None"
+            LOW -> "Low"
+            MEDIUM -> "Medium"
+            HIGH -> "High"
+        }
+
+    val value: String?
+        get() = when (this) {
+            DEFAULT -> null
+            NONE -> "none"
+            LOW -> "low"
+            MEDIUM -> "medium"
+            HIGH -> "high"
+        }
+}
+
 @Serializable
 data class HeaderEntry(
     val name: String = "",
@@ -37,6 +84,8 @@ data class Provider(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "",
     val apiMode: ApiMode = ApiMode.OPENAI,
+    val openAiMode: OpenAiMode = OpenAiMode.WIRE,
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.DEFAULT,
     /** Base URL without the endpoint path, e.g. `https://api.openai.com/v1`. */
     val baseUrl: String = "",
     /** One or more API keys, separated by commas, semicolons or newlines. Rotated in order. */

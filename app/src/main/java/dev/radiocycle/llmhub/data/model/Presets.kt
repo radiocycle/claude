@@ -11,10 +11,14 @@ data class ProviderPreset(
     val headers: List<HeaderEntry> = emptyList(),
     val keyHint: String = "",
     val needsKey: Boolean = true,
+    val openAiMode: OpenAiMode = OpenAiMode.WIRE,
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.DEFAULT,
 ) {
     fun toProvider(priority: Int): Provider = Provider(
         name = name,
         apiMode = apiMode,
+        openAiMode = openAiMode,
+        reasoningEffort = reasoningEffort,
         baseUrl = baseUrl,
         models = models,
         defaultModel = defaultModel,
