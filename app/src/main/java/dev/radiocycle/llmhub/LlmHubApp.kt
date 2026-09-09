@@ -5,6 +5,7 @@ import dev.radiocycle.llmhub.data.repo.ConversationRepository
 import dev.radiocycle.llmhub.data.repo.ProviderRepository
 import dev.radiocycle.llmhub.data.repo.SettingsRepository
 import dev.radiocycle.llmhub.rotation.ChatEngine
+import dev.radiocycle.llmhub.runtime.ChatController
 import dev.radiocycle.llmhub.rotation.RotationEngine
 import dev.radiocycle.llmhub.tools.DeleteFileTool
 import dev.radiocycle.llmhub.tools.EditFileTool
@@ -61,4 +62,6 @@ class AppContainer(app: Application) {
     )
 
     val chatEngine = ChatEngine(settings, rotation, toolRegistry)
+
+    val chatController = ChatController(app, scope, conversations, chatEngine)
 }

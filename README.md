@@ -103,6 +103,14 @@ anywhere.
   carry between calls, so steps are chained with `&&` inside one command. The shell is off by
   default — it runs real commands on the device.
 
+**Background generation.** A turn runs on an application-scoped controller and is kept alive by a
+foreground service, so generation continues — and finishes — when the chat screen or the whole app
+is in the background. The service's ongoing notification mirrors what the agent is doing in real
+time ("Connecting…", "Generating · <provider>", "Using web_search…", "Calling tools…") and carries a
+Stop action; when the turn ends it is replaced by a dismissible "Response ready" (or failure)
+notification that reopens the app. Notifications need the runtime permission on Android 13+, asked
+for once on first launch; denying it only costs the notifications, not the background run.
+
 ## Architecture
 
 ```
@@ -111,6 +119,7 @@ data/store      JsonFileStore — atomic JSON files in app-private storage, mirr
 data/repo       Provider / Conversation / Settings repositories
 net             LlmClient + OpenAiClient, AnthropicClient, GoogleClient, SSE reader, error taxonomy
 rotation        RotationEngine (endpoint choice, health, handoff), ChatEngine (agent loop)
+runtime         ChatController (app-scoped turn + status), GenerationService (foreground + notifications)
 tools           AgentTool, ToolRegistry, WebSearchTool, WebFetchTool, ExecJsTool, JsSandbox
                 WorkspaceManager + RootAccess, ShellTool, file tools (read/write/edit/delete/list)
 ui              Compose screens: chat, providers, provider editor, settings

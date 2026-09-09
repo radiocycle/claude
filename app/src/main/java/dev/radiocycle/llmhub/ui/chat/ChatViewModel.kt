@@ -8,11 +8,12 @@ import dev.radiocycle.llmhub.data.model.ChatMessage
 import dev.radiocycle.llmhub.data.model.Conversation
 import dev.radiocycle.llmhub.data.model.Provider
 import dev.radiocycle.llmhub.data.model.Role
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 
 data class ChatUiState(
     val conversationId: String? = null,
@@ -24,16 +25,47 @@ data class ChatUiState(
     val notice: String? = null,
 )
 
+/** Which conversation the screen is looking at, plus its transient pin/notice. */
+private data class OpenState(
+    val conversationId: String? = null,
+    val pinnedProviderId: String? = null,
+    val pinnedModel: String? = null,
+    val notice: String? = null,
+)
+
+/**
+ * Presents one conversation. Generation itself lives in the application-scoped [ChatController], so
+ * a turn keeps running (and the notification keeps updating) when this screen or the whole Activity
+ * goes away. The UI state is a projection of the open conversation over the controller's live turn.
+ */
 class ChatViewModel(private val container: AppContainer) : ViewModel() {
 
-    private val _state = MutableStateFlow(ChatUiState())
-    val state: StateFlow<ChatUiState> = _state.asStateFlow()
+    private val controller = container.chatController
+
+    private val _open = MutableStateFlow(OpenState())
 
     val conversations: StateFlow<List<Conversation>> = container.conversations.conversations
     val providers: StateFlow<List<Provider>> = container.providers.providers
     val settings: StateFlow<AppSettings> = container.settings.settings
 
-    private var streamJob: Job? = null
+    val state: StateFlow<ChatUiState> = combine(
+        _open,
+        container.conversations.conversations,
+        controller.live,
+        controller.status,
+    ) { open, conversations, live, status ->
+        val conversation = conversations.firstOrNull { it.id == open.conversationId }
+        val liveHere = live?.takeIf { it.conversationId == open.conversationId }
+        ChatUiState(
+            conversationId = open.conversationId,
+            title = conversation?.title ?: "New chat",
+            messages = liveHere?.messages ?: conversation?.messages ?: emptyList(),
+            isStreaming = status.active && status.conversationId == open.conversationId,
+            pinnedProviderId = open.pinnedProviderId,
+            pinnedModel = open.pinnedModel,
+            notice = open.notice,
+        )
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, ChatUiState())
 
     init {
         val existing = container.conversations.conversations.value.firstOrNull()
@@ -41,25 +73,20 @@ class ChatViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun open(conversationId: String) {
-        stop()
         val conversation = container.conversations.byId(conversationId) ?: return
-        _state.value = ChatUiState(
+        _open.value = OpenState(
             conversationId = conversation.id,
-            title = conversation.title,
-            messages = conversation.messages,
             pinnedProviderId = conversation.pinnedProviderId,
             pinnedModel = conversation.pinnedModel,
         )
     }
 
     fun newChat() {
-        stop()
-        val previous = _state.value
+        val previous = _open.value
         val conversation = container.conversations.create()
-        _state.value = ChatUiState(
+        // Carry the model choice over to the new chat — it is nearly always what you want.
+        _open.value = OpenState(
             conversationId = conversation.id,
-            title = conversation.title,
-            // Carry the model choice over to the new chat — it is nearly always what you want.
             pinnedProviderId = previous.pinnedProviderId,
             pinnedModel = previous.pinnedModel,
         )
@@ -67,109 +94,72 @@ class ChatViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun deleteConversation(id: String) {
+        if (controller.status.value.conversationId == id) controller.stop()
         container.conversations.delete(id)
-        if (_state.value.conversationId == id) {
-            val next = container.conversations.conversations.value.firstOrNull()
+        if (_open.value.conversationId == id) {
+            val next = container.conversations.conversations.value.firstOrNull { it.id != id }
             if (next != null) open(next.id) else newChat()
         }
     }
 
     fun rename(title: String) {
-        val id = _state.value.conversationId ?: return
+        val id = _open.value.conversationId ?: return
         container.conversations.rename(id, title)
-        _state.value = _state.value.copy(title = title)
     }
 
     fun pin(providerId: String?, model: String?) {
-        _state.value = _state.value.copy(pinnedProviderId = providerId, pinnedModel = model)
+        _open.update { it.copy(pinnedProviderId = providerId, pinnedModel = model) }
         persistPin()
     }
 
     fun dismissNotice() {
-        _state.value = _state.value.copy(notice = null)
+        _open.update { it.copy(notice = null) }
     }
 
     fun send(text: String) {
         val prompt = text.trim()
-        if (prompt.isEmpty() || _state.value.isStreaming) return
+        if (prompt.isEmpty()) return
 
+        if (controller.isActive) {
+            _open.update { it.copy(notice = "Already generating — stop it first or wait.") }
+            return
+        }
         if (container.providers.rotationPool().isEmpty()) {
-            _state.value = _state.value.copy(
-                notice = "Add and enable at least one provider before sending."
-            )
+            _open.update { it.copy(notice = "Add and enable at least one provider before sending.") }
             return
         }
 
-        val conversationId = _state.value.conversationId ?: container.conversations.create().id
-        val history = _state.value.messages + ChatMessage(role = Role.USER, content = prompt)
-        _state.value = _state.value.copy(
-            conversationId = conversationId,
-            messages = history,
-            isStreaming = true,
-            notice = null,
-        )
-        persist(conversationId, history)
+        val open = _open.value
+        val conversationId = open.conversationId ?: container.conversations.create().id
+        if (open.conversationId == null) _open.update { it.copy(conversationId = conversationId) }
 
-        streamJob = viewModelScope.launch {
-            try {
-                container.chatEngine
-                    .run(history, _state.value.pinnedProviderId, _state.value.pinnedModel)
-                    .collect { produced -> _state.value = _state.value.copy(messages = history + produced) }
-            } catch (t: Throwable) {
-                _state.value = _state.value.copy(
-                    messages = _state.value.messages + ChatMessage(
-                        role = Role.ASSISTANT,
-                        error = t.message ?: "Request failed",
-                    )
-                )
-            } finally {
-                _state.value = _state.value.copy(isStreaming = false)
-                persist(conversationId, _state.value.messages)
-                refreshTitle(conversationId)
-            }
-        }
+        val current = state.value.messages
+        val history = current + ChatMessage(role = Role.USER, content = prompt)
+        container.conversations.setMessages(conversationId, history)
+        _open.update { it.copy(notice = null) }
+        controller.send(conversationId, history, open.pinnedProviderId, open.pinnedModel)
     }
 
-    /** Keeps whatever has streamed so far — a stopped answer is still worth reading. */
-    fun stop() {
-        streamJob?.cancel()
-        streamJob = null
-        if (_state.value.isStreaming) {
-            _state.value = _state.value.copy(isStreaming = false)
-            _state.value.conversationId?.let { persist(it, _state.value.messages) }
-        }
-    }
+    fun stop() = controller.stop()
 
     fun retryLast() {
-        val messages = _state.value.messages
+        if (controller.isActive) return
+        val messages = state.value.messages
         val lastUser = messages.indexOfLast { it.role == Role.USER }
-        if (lastUser < 0 || _state.value.isStreaming) return
+        if (lastUser < 0) return
         val prompt = messages[lastUser].content
         val trimmed = messages.take(lastUser)
-        _state.value = _state.value.copy(messages = trimmed)
-        _state.value.conversationId?.let { persist(it, trimmed) }
-        send(prompt)
-    }
-
-    private fun persist(conversationId: String, messages: List<ChatMessage>) {
-        container.conversations.setMessages(conversationId, messages)
+        val conversationId = _open.value.conversationId ?: return
+        container.conversations.setMessages(conversationId, trimmed)
+        val history = trimmed + ChatMessage(role = Role.USER, content = prompt)
+        container.conversations.setMessages(conversationId, history)
+        controller.send(conversationId, history, _open.value.pinnedProviderId, _open.value.pinnedModel)
     }
 
     private fun persistPin() {
-        val state = _state.value
-        state.conversationId?.let {
-            container.conversations.setPinned(it, state.pinnedProviderId, state.pinnedModel)
+        val open = _open.value
+        open.conversationId?.let {
+            container.conversations.setPinned(it, open.pinnedProviderId, open.pinnedModel)
         }
-    }
-
-    private fun refreshTitle(conversationId: String) {
-        container.conversations.byId(conversationId)?.let { conversation ->
-            _state.value = _state.value.copy(title = conversation.title)
-        }
-    }
-
-    override fun onCleared() {
-        streamJob?.cancel()
-        super.onCleared()
     }
 }
