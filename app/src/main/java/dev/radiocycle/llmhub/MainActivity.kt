@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
             val settings by container.settings.settings.collectAsStateWithLifecycle()
             LlmHubTheme(
                 themeMode = settings.themeMode,
+                colorTheme = settings.colorTheme,
                 dynamicColor = settings.dynamicColor,
             ) {
                 Surface(

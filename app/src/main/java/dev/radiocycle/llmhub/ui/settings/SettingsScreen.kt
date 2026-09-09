@@ -2,8 +2,10 @@ package dev.radiocycle.llmhub.ui.settings
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -16,9 +18,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import dev.radiocycle.llmhub.data.model.AppTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.FileUpload
@@ -530,6 +536,11 @@ fun SettingsScreen(
 
             Section("Appearance")
 
+            Text(
+                "Theme Mode",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ThemeMode.entries.forEach { mode ->
                     FilterChip(
@@ -547,15 +558,46 @@ fun SettingsScreen(
                 onChange = { enabled -> repository.update { it.copy(richRendering = enabled) } },
             )
             ToggleRow(
-                title = "Dynamic color",
+                title = "Dynamic color (Monet)",
                 subtitle = "Derive the palette from the wallpaper (Android 12+)",
                 checked = settings.dynamicColor,
                 onChange = { enabled -> repository.update { it.copy(dynamicColor = enabled) } },
             )
 
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Color Theme",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AppTheme.entries.forEach { theme ->
+                    FilterChip(
+                        selected = !settings.dynamicColor && settings.colorTheme == theme,
+                        onClick = {
+                            repository.update {
+                                it.copy(colorTheme = theme, dynamicColor = false)
+                            }
+                        },
+                        leadingIcon = {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(theme.previewColorHex))
+                            )
+                        },
+                        label = { Text(theme.label) },
+                    )
+                }
+            }
+
             Section("About")
             Text(
-                "LLM Hub v1.1.0 — one interface over OpenAI, Anthropic, Google and any compatible endpoint, " +
+                "LLM Hub v1.2.0 — one interface over OpenAI, Anthropic, Google and any compatible endpoint, " +
                     "with automatic failover and built-in tools. Keys are stored in this app's private " +
                     "storage and are only ever sent to the provider they belong to.",
                 style = MaterialTheme.typography.bodySmall,

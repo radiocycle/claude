@@ -7,11 +7,13 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import dev.radiocycle.llmhub.data.model.AppTheme
 import dev.radiocycle.llmhub.data.model.ThemeMode
 
 @Composable
 fun LlmHubTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
+    colorTheme: AppTheme = AppTheme.DEFAULT,
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
@@ -24,8 +26,7 @@ fun LlmHubTheme(
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        dark -> DarkColors
-        else -> LightColors
+        else -> themeColorScheme(colorTheme, dark)
     }
 
     MaterialTheme(
