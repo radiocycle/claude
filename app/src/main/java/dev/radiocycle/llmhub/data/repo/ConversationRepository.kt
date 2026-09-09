@@ -3,6 +3,7 @@ package dev.radiocycle.llmhub.data.repo
 import android.content.Context
 import dev.radiocycle.llmhub.data.model.ChatMessage
 import dev.radiocycle.llmhub.data.model.Conversation
+import dev.radiocycle.llmhub.data.model.Role
 import dev.radiocycle.llmhub.data.store.JsonFileStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
@@ -38,7 +39,7 @@ class ConversationRepository(context: Context, scope: CoroutineScope) {
     fun setMessages(id: String, messages: List<ChatMessage>) = mutate(id) { conversation ->
         val autoTitle = conversation.title
             .takeUnless { it == DEFAULT_TITLE }
-            ?: messages.firstOrNull { it.role.name == "USER" }?.content?.toTitle()
+            ?: messages.firstOrNull { it.role == Role.USER }?.content?.toTitle()
             ?: DEFAULT_TITLE
         conversation.copy(messages = messages, title = autoTitle)
     }

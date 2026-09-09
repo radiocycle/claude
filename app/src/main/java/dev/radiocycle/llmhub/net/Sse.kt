@@ -6,27 +6,27 @@ import okhttp3.Response
 data class SseEvent(val name: String?, val data: String)
 
 /**
- * Reads an SSE body line by line. Blocking — always call from an IO dispatcher inside a flow.
- * Stops early when [onEvent] returns false.
+ * Reads an SSE body line by line, stopping early when [onEvent] returns false. Blocking — call it
+ * from an IO dispatcher. Kept free of local helper functions so the lambda stays inlinable and can
+ * therefore suspend (it emits straight into a flow).
  */
 inline fun Response.readSse(onEvent: (SseEvent) -> Boolean) {
     val source = body?.source() ?: throw LlmException("Empty stream body", kind = LlmException.Kind.PARSE)
     var eventName: String? = null
     val data = StringBuilder()
+    var stopped = false
 
-    fun flush(): Boolean {
-        if (data.isEmpty() && eventName == null) return true
-        val payload = data.toString()
-        data.setLength(0)
-        val name = eventName
-        eventName = null
-        return onEvent(SseEvent(name, payload))
-    }
-
-    while (true) {
+    while (!stopped) {
         val line = source.readUtf8Line() ?: break
         when {
-            line.isEmpty() -> if (!flush()) return
+            line.isEmpty() -> {
+                if (data.isNotEmpty() || eventName != null) {
+                    val event = SseEvent(eventName, data.toString())
+                    data.setLength(0)
+                    eventName = null
+                    if (!onEvent(event)) stopped = true
+                }
+            }
             line.startsWith(":") -> Unit // comment / keep-alive
             line.startsWith("event:") -> eventName = line.removePrefix("event:").trim()
             line.startsWith("data:") -> {
@@ -35,5 +35,8 @@ inline fun Response.readSse(onEvent: (SseEvent) -> Boolean) {
             }
         }
     }
-    flush()
+
+    if (!stopped && (data.isNotEmpty() || eventName != null)) {
+        onEvent(SseEvent(eventName, data.toString()))
+    }
 }
