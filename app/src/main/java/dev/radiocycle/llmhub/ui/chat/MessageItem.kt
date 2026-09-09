@@ -48,11 +48,19 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.text.style.TextOverflow
+import dev.radiocycle.llmhub.core.AppJson
 import dev.radiocycle.llmhub.data.model.ChatMessage
 import dev.radiocycle.llmhub.data.model.Role
+import dev.radiocycle.llmhub.data.model.ToolCall
 import dev.radiocycle.llmhub.data.model.ToolResult
 import dev.radiocycle.llmhub.ui.common.MarkdownText
 import dev.radiocycle.llmhub.ui.common.RichMarkdown
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 @Composable
 fun MessageItem(
@@ -61,17 +69,16 @@ fun MessageItem(
     isStreaming: Boolean,
     richRendering: Boolean,
     showProviderBadge: Boolean = true,
-    hasSubsequentToolResult: Boolean = false,
+    matchingToolCalls: List<ToolCall> = emptyList(),
 ) {
     when (message.role) {
         Role.USER -> UserMessage(message)
-        Role.TOOL -> ToolMessage(message)
+        Role.TOOL -> ToolMessage(message, matchingToolCalls)
         Role.ASSISTANT -> AssistantMessage(
             message = message,
             showCursor = isLast && isStreaming,
             richRendering = richRendering,
             showProviderBadge = showProviderBadge,
-            hasSubsequentToolResult = hasSubsequentToolResult,
         )
         Role.SYSTEM -> Unit
     }
@@ -95,13 +102,13 @@ private fun UserMessage(message: ChatMessage) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AssistantMessage(
     message: ChatMessage,
     showCursor: Boolean,
     richRendering: Boolean,
     showProviderBadge: Boolean,
-    hasSubsequentToolResult: Boolean,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (showProviderBadge && message.providerName != null) {
@@ -130,9 +137,12 @@ private fun AssistantMessage(
             Text("▍", style = MaterialTheme.typography.bodyLarge)
         }
 
-        if (!hasSubsequentToolResult && message.toolCalls.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                message.toolCalls.forEach { call -> ToolChip(call.name) }
+        if (message.toolCalls.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                message.toolCalls.forEach { call -> ToolChip(call) }
             }
         }
 
@@ -195,7 +205,8 @@ private fun SwitchNotice(note: String) {
 }
 
 @Composable
-private fun ToolChip(name: String) {
+private fun ToolChip(call: ToolCall) {
+    val label = remember(call) { formatToolCallLabel(call) }
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer,
         contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -206,25 +217,34 @@ private fun ToolChip(name: String) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Icon(iconForTool(name), contentDescription = null, Modifier.size(15.dp))
-            Text(name, style = MaterialTheme.typography.labelMedium)
+            Icon(iconForTool(call.name), contentDescription = null, Modifier.size(15.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
 
 @Composable
-private fun ToolMessage(message: ChatMessage) {
+private fun ToolMessage(message: ChatMessage, matchingToolCalls: List<ToolCall>) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        message.toolResults.forEach { result -> ToolResultCard(result) }
+        message.toolResults.forEach { result ->
+            val matchingCall = matchingToolCalls.firstOrNull { it.id == result.callId }
+            ToolResultCard(result, matchingCall)
+        }
     }
 }
 
 @Composable
-private fun ToolResultCard(result: ToolResult) {
+private fun ToolResultCard(result: ToolResult, call: ToolCall? = null) {
     val running = result.content == "…running"
+    val baseLabel = if (call != null) formatToolCallLabel(call) else result.name
     CollapsibleBlock(
         title = buildString {
-            append(result.name)
+            append(baseLabel)
             when {
                 running -> append(" · running")
                 result.isError -> append(" · failed")
@@ -319,3 +339,72 @@ fun ThinkingRow(label: String) {
         )
     }
 }
+
+fun formatToolCallLabel(call: ToolCall): String {
+    val arg = extractToolArgument(call.name, call.argumentsJson)
+    return if (arg.isNullOrBlank()) {
+        call.name
+    } else {
+        "${call.name}: $arg"
+    }
+}
+
+fun extractToolArgument(name: String, argumentsJson: String): String? {
+    if (argumentsJson.isBlank()) return null
+    val fromJson = runCatching {
+        val element = AppJson.parseToJsonElement(argumentsJson)
+        val obj = element as? JsonObject ?: return@runCatching null
+        val (rawVal, shouldQuote) = when (name) {
+            "web_search" -> (obj["query"]?.jsonPrimitive?.contentOrNull) to true
+            "web_fetch" -> (obj["url"]?.jsonPrimitive?.contentOrNull) to true
+            "shell" -> (obj["command"]?.jsonPrimitive?.contentOrNull) to false
+            "read_file", "write_file", "edit_file", "delete_file", "list_files" ->
+                (obj["path"]?.jsonPrimitive?.contentOrNull) to false
+            "exec_js" -> (obj["code"]?.jsonPrimitive?.contentOrNull) to false
+            else -> {
+                val candidate = obj["query"]?.jsonPrimitive?.contentOrNull?.let { it to true }
+                    ?: obj["url"]?.jsonPrimitive?.contentOrNull?.let { it to true }
+                    ?: obj["command"]?.jsonPrimitive?.contentOrNull?.let { it to false }
+                    ?: obj["cmd"]?.jsonPrimitive?.contentOrNull?.let { it to false }
+                    ?: obj["path"]?.jsonPrimitive?.contentOrNull?.let { it to false }
+                    ?: obj["file"]?.jsonPrimitive?.contentOrNull?.let { it to false }
+                    ?: obj["filename"]?.jsonPrimitive?.contentOrNull?.let { it to false }
+                    ?: obj["prompt"]?.jsonPrimitive?.contentOrNull?.let { it to true }
+                    ?: obj["input"]?.jsonPrimitive?.contentOrNull?.let { it to true }
+                    ?: obj["code"]?.jsonPrimitive?.contentOrNull?.let { it to false }
+                    ?: obj.entries.firstOrNull()?.let { (k, v) ->
+                        v.jsonPrimitive.contentOrNull?.let { it to (k in setOf("query", "url", "text", "prompt")) }
+                    }
+                candidate
+            }
+        } ?: return@runCatching null
+        formatExtractedArg(rawVal, shouldQuote)
+    }.getOrNull()
+
+    if (fromJson != null) return fromJson
+
+    return runCatching {
+        val key = when (name) {
+            "web_search" -> "query"
+            "web_fetch" -> "url"
+            "shell" -> "command"
+            "read_file", "write_file", "edit_file", "delete_file", "list_files" -> "path"
+            "exec_js" -> "code"
+            else -> "query|url|command|cmd|path|file|code|input|prompt"
+        }
+        val match = Regex("""\"(?:$key)\"\s*:\s*\"([^\"]+)""").find(argumentsJson)
+        match?.groupValues?.get(1)?.let { raw ->
+            val quote = name == "web_search" || name == "web_fetch" || key in listOf("query", "url", "prompt")
+            formatExtractedArg(raw, quote)
+        }
+    }.getOrNull()
+}
+
+private fun formatExtractedArg(rawVal: String, shouldQuote: Boolean): String? {
+    val clean = rawVal.replace('\n', ' ').replace('\r', ' ').trim()
+    if (clean.isEmpty()) return null
+    val maxLen = 45
+    val truncated = if (clean.length > maxLen) clean.take(maxLen).trimEnd() + "…" else clean
+    return if (shouldQuote) "\"$truncated\"" else truncated
+}
+
