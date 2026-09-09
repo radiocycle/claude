@@ -8,7 +8,8 @@ enum class SearchBackend {
     @SerialName("duckduckgo") DUCKDUCKGO,
     @SerialName("tavily") TAVILY,
     @SerialName("brave") BRAVE,
-    @SerialName("searxng") SEARXNG;
+    @SerialName("searxng") SEARXNG,
+    @SerialName("firecrawl") FIRECRAWL;
 
     val label: String
         get() = when (this) {
@@ -16,6 +17,7 @@ enum class SearchBackend {
             TAVILY -> "Tavily"
             BRAVE -> "Brave Search"
             SEARXNG -> "SearXNG"
+            FIRECRAWL -> "Firecrawl"
         }
 
     val needsKey: Boolean get() = this == TAVILY || this == BRAVE
@@ -62,6 +64,9 @@ data class ToolSettings(
     val searchBackend: SearchBackend = SearchBackend.DUCKDUCKGO,
     val searchApiKey: String = "",
     val searxngUrl: String = "https://searx.be",
+    val firecrawlBaseUrl: String = "https://api.firecrawl.dev",
+    val firecrawlApiKey: String = "",
+    val scrapeWithFirecrawl: Boolean = false,
     val maxSearchResults: Int = 6,
     val fetchCharLimit: Int = 20000,
     val jsTimeoutMs: Long = 5000,

@@ -1,13 +1,23 @@
 package dev.radiocycle.llmhub.tools
 
+import dev.radiocycle.llmhub.core.AppJson
 import dev.radiocycle.llmhub.data.repo.SettingsRepository
 import dev.radiocycle.llmhub.net.Http
+import dev.radiocycle.llmhub.net.normalizeFirecrawlBaseUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 /** Fetches a URL and returns readable text extracted from the HTML. */
 class WebFetchTool(private val settings: SettingsRepository) : AgentTool {
@@ -29,6 +39,15 @@ class WebFetchTool(private val settings: SettingsRepository) : AgentTool {
         }
         val limit = args["max_chars"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
             ?: settings.current.tools.fetchCharLimit
+
+        val toolSettings = settings.current.tools
+        if (toolSettings.scrapeWithFirecrawl) {
+            val baseUrl = toolSettings.firecrawlBaseUrl.ifBlank { "https://api.firecrawl.dev" }
+            val apiKey = toolSettings.firecrawlApiKey.ifBlank { toolSettings.searchApiKey }
+            return@withContext runCatching {
+                firecrawlScrape(url, limit, baseUrl, apiKey)
+            }.getOrElse { ToolOutcome("Firecrawl scrape failed for $url: ${it.message}", isError = true) }
+        }
 
         val request = Request.Builder()
             .url(url)
@@ -61,9 +80,61 @@ class WebFetchTool(private val settings: SettingsRepository) : AgentTool {
         }.getOrElse { ToolOutcome("Failed to fetch $url: ${it.message}", isError = true) }
     }
 
+    private fun firecrawlScrape(url: String, limit: Int, baseUrl: String, apiKey: String): ToolOutcome {
+        val rootUrl = baseUrl.normalizeFirecrawlBaseUrl()
+        val endpoint = "$rootUrl/v1/scrape"
+        val payload = buildJsonObject {
+            put("url", url)
+            putJsonArray("formats") {
+                add("markdown")
+            }
+        }
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(payload.toString().toRequestBody(JSON))
+            .header("Content-Type", "application/json")
+            .apply {
+                if (apiKey.isNotBlank()) header("Authorization", "Bearer ${apiKey.trim()}")
+            }
+            .build()
+
+        val responseBody = Http.withTimeout(60).newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                error("Firecrawl returned HTTP ${response.code}: ${body.take(300)}")
+            }
+            body
+        }
+
+        val root = AppJson.parseToJsonElement(responseBody).jsonObject
+        if (root["success"]?.jsonPrimitive?.booleanOrNull == false) {
+            val err = root["error"]?.jsonPrimitive?.contentOrNull ?: "unknown error"
+            error("Firecrawl error: $err")
+        }
+
+        val data = root["data"]?.jsonObject ?: error("Firecrawl response missing data object")
+        val text = data["markdown"]?.jsonPrimitive?.contentOrNull
+            ?: data["content"]?.jsonPrimitive?.contentOrNull
+            ?: ""
+        val title = data["metadata"]?.jsonObject?.get("title")?.jsonPrimitive?.contentOrNull.orEmpty()
+        val truncated = text.length > limit
+
+        return ToolOutcome(
+            buildString {
+                appendLine("URL: $url")
+                if (title.isNotBlank()) appendLine("Title: ${title.trim()}")
+                appendLine("Provider: Firecrawl")
+                appendLine("Length: ${text.length} chars${if (truncated) " (truncated to $limit)" else ""}")
+                appendLine("---")
+                append(text.take(limit))
+            }
+        )
+    }
+
     companion object {
         const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Mobile Safari/537.36"
+        private val JSON = "application/json; charset=utf-8".toMediaType()
     }
 }
 

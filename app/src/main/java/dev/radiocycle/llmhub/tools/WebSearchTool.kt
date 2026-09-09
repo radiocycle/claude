@@ -4,10 +4,12 @@ import dev.radiocycle.llmhub.core.AppJson
 import dev.radiocycle.llmhub.data.model.SearchBackend
 import dev.radiocycle.llmhub.data.repo.SettingsRepository
 import dev.radiocycle.llmhub.net.Http
+import dev.radiocycle.llmhub.net.normalizeFirecrawlBaseUrl
 import dev.radiocycle.llmhub.net.trimBaseUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -52,6 +54,12 @@ class WebSearchTool(private val settings: SettingsRepository) : AgentTool {
                 SearchBackend.TAVILY -> tavily(query, count, toolSettings.searchApiKey)
                 SearchBackend.BRAVE -> brave(query, count, toolSettings.searchApiKey)
                 SearchBackend.SEARXNG -> searxng(query, count, toolSettings.searxngUrl)
+                SearchBackend.FIRECRAWL -> firecrawl(
+                    query,
+                    count,
+                    toolSettings.firecrawlBaseUrl.ifBlank { "https://api.firecrawl.dev" },
+                    toolSettings.firecrawlApiKey.ifBlank { toolSettings.searchApiKey },
+                )
             }
         }.fold(
             onSuccess = { results ->
@@ -178,6 +186,51 @@ class WebSearchTool(private val settings: SettingsRepository) : AgentTool {
                     snippet = item["content"]?.jsonPrimitive?.contentOrNull.orEmpty().take(400),
                 )
             }.orEmpty()
+        }
+    }
+
+    private fun firecrawl(query: String, count: Int, baseUrl: String, apiKey: String): List<SearchResult> {
+        val rootUrl = baseUrl.normalizeFirecrawlBaseUrl()
+        val endpoint = "$rootUrl/v1/search"
+        val payload = buildJsonObject {
+            put("query", query)
+            put("limit", count)
+        }
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(payload.toString().toRequestBody(JSON))
+            .header("Content-Type", "application/json")
+            .apply {
+                if (apiKey.isNotBlank()) header("Authorization", "Bearer ${apiKey.trim()}")
+            }
+            .build()
+
+        val responseBody = Http.withTimeout(30).newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                error("Firecrawl returned HTTP ${response.code}: ${body.take(300)}")
+            }
+            body
+        }
+
+        val root = AppJson.parseToJsonElement(responseBody).jsonObject
+        if (root["success"]?.jsonPrimitive?.booleanOrNull == false) {
+            val err = root["error"]?.jsonPrimitive?.contentOrNull ?: "unknown error"
+            error("Firecrawl error: $err")
+        }
+
+        val data = root["data"]?.jsonArray ?: return emptyList()
+        return data.mapNotNull { element ->
+            val item = element.jsonObject
+            val url = item["url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val title = item["title"]?.jsonPrimitive?.contentOrNull
+                ?: item["metadata"]?.jsonObject?.get("title")?.jsonPrimitive?.contentOrNull
+                ?: url
+            val snippet = item["description"]?.jsonPrimitive?.contentOrNull
+                ?: item["snippet"]?.jsonPrimitive?.contentOrNull
+                ?: item["markdown"]?.jsonPrimitive?.contentOrNull?.take(300)
+                ?: ""
+            SearchResult(title = title.trim(), url = url.trim(), snippet = snippet.trim())
         }
     }
 

@@ -31,6 +31,11 @@ object Http {
 
 fun String.trimBaseUrl(): String = trim().trimEnd('/')
 
+fun String.normalizeFirecrawlBaseUrl(): String {
+    val trimmed = trim().trimEnd('/')
+    return if (trimmed.endsWith("/v1")) trimmed.removeSuffix("/v1") else trimmed
+}
+
 fun Request.Builder.applyCustomHeaders(headers: List<dev.radiocycle.llmhub.data.model.HeaderEntry>): Request.Builder {
     headers.forEach { entry ->
         val name = entry.name.trim()

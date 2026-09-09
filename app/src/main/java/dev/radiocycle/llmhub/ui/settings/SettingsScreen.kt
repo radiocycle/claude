@@ -208,6 +208,16 @@ fun SettingsScreen(repository: SettingsRepository, workspace: WorkspaceManager) 
                     repository.update { it.copy(tools = it.tools.copy(webFetchEnabled = enabled)) }
                 },
             )
+            if (settings.tools.webFetchEnabled) {
+                ToggleRow(
+                    title = "Scrape via Firecrawl",
+                    subtitle = "Use Firecrawl to extract clean markdown from web pages",
+                    checked = settings.tools.scrapeWithFirecrawl,
+                    onChange = { enabled ->
+                        repository.update { it.copy(tools = it.tools.copy(scrapeWithFirecrawl = enabled)) }
+                    },
+                )
+            }
             ToggleRow(
                 title = "exec_js",
                 subtitle = "Run JavaScript in a sandboxed engine",
@@ -268,6 +278,28 @@ fun SettingsScreen(repository: SettingsRepository, workspace: WorkspaceManager) 
                         repository.update { it.copy(tools = it.tools.copy(searxngUrl = url)) }
                     },
                     label = { Text("SearXNG instance URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (settings.tools.searchBackend == SearchBackend.FIRECRAWL || settings.tools.scrapeWithFirecrawl) {
+                OutlinedTextField(
+                    value = settings.tools.firecrawlBaseUrl,
+                    onValueChange = { url ->
+                        repository.update { it.copy(tools = it.tools.copy(firecrawlBaseUrl = url)) }
+                    },
+                    label = { Text("Firecrawl Base URL") },
+                    placeholder = { Text("https://api.firecrawl.dev") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = settings.tools.firecrawlApiKey,
+                    onValueChange = { key ->
+                        repository.update { it.copy(tools = it.tools.copy(firecrawlApiKey = key)) }
+                    },
+                    label = { Text("Firecrawl API key") },
+                    placeholder = { Text("fc-... (optional for self-hosted)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
