@@ -75,19 +75,25 @@
     font: inherit; color: var(--accent); background: none; border: none;
     padding: 4px 10px; border-radius: 999px; cursor: pointer;
   }
-  .codeblock pre { margin: 0; padding: 0 14px 12px; overflow-x: auto; }
+  .codeblock pre {
+    margin: 0; padding: 0 14px 12px;
+    overflow-x: auto; overscroll-behavior-x: contain;
+  }
   .codeblock pre code {
     background: none; padding: 0; border-radius: 0;
     font-size: var(--code-size); line-height: 1.5; white-space: pre;
   }
 
-  .tablewrap { overflow-x: auto; margin: 0 0 0.8em; }
+  .tablewrap { overflow-x: auto; overscroll-behavior-x: contain; margin: 0 0 0.8em; }
   table { border-collapse: collapse; width: auto; min-width: 100%; font-size: 0.94em; }
   th, td { border: 1px solid var(--outline); padding: 7px 11px; text-align: left; vertical-align: top; }
   th { background: var(--surface); font-weight: 600; }
   tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface) 45%, transparent); }
 
-  .math-display { overflow-x: auto; overflow-y: hidden; margin: 0.5em 0 0.9em; padding: 2px 0; }
+  .math-display {
+    overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+    margin: 0.5em 0 0.9em; padding: 2px 0;
+  }
   .math-display .katex-display { margin: 0; }
   .katex { font-size: 1.05em; }
   .math-error {
@@ -253,13 +259,18 @@
     requestAnimationFrame(function () { requestAnimationFrame(fn); });
   }
 
+  function settle() {
+    report();
+    reportExclusions();
+  }
+
   window.LlmHub = {
     setTheme: function (json) {
       var theme;
       try { theme = JSON.parse(json); } catch (e) { return; }
       var root = document.documentElement.style;
       Object.keys(theme).forEach(function (k) { root.setProperty('--' + k, theme[k]); });
-      afterPaint(report);
+      afterPaint(settle);
     },
 
     setContent: function (markdown) {
@@ -270,7 +281,7 @@
         html = '<p class="math-error">' + escapeHtml(String(e && e.message || e)) + '</p>';
       }
       content.innerHTML = html;
-      afterPaint(report);
+      afterPaint(settle);
     }
   };
 
@@ -292,8 +303,39 @@
     }
   });
 
-  if (window.ResizeObserver) new ResizeObserver(report).observe(document.body);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { afterPaint(report); });
+  // Tell the host whether this touch began over something that scrolls sideways, so it can decide
+  // between panning that region and letting the surrounding app handle the drag.
+  var SCROLLERS = '.tablewrap, .math-display, .codeblock pre';
+
+  function reportScrollable(event) {
+    if (!bridge || !bridge.setOverScrollableRegion) return;
+    var target = event.target;
+    var el = target && target.closest ? target.closest(SCROLLERS) : null;
+    bridge.setOverScrollableRegion(!!(el && el.scrollWidth > el.clientWidth + 1));
+  }
+
+  function reportExclusions() {
+    if (!bridge || !bridge.setExclusions) return;
+    var rects = [];
+    var nodes = document.querySelectorAll(SCROLLERS);
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (el.scrollWidth > el.clientWidth + 1) {
+        var box = el.getBoundingClientRect();
+        rects.push({ top: Math.max(0, Math.round(box.top)), height: Math.round(box.height) });
+      }
+    }
+    try { bridge.setExclusions(JSON.stringify(rects)); } catch (e) { }
+  }
+
+  document.addEventListener('touchstart', reportScrollable, { passive: true });
+  document.addEventListener('touchmove', reportScrollable, { passive: true });
+  document.addEventListener('touchend', function () {
+    if (bridge && bridge.setOverScrollableRegion) bridge.setOverScrollableRegion(false);
+  }, { passive: true });
+
+  if (window.ResizeObserver) new ResizeObserver(settle).observe(document.body);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { afterPaint(settle); });
   if (bridge && bridge.onReady) bridge.onReady();
 })();
 </script>

@@ -81,6 +81,9 @@ fun ChatScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        // Swipe only closes an open drawer. Edge-swipe-to-open would fight every horizontal drag
+        // on the screen — scrolling a wide table or a long formula, most of all.
+        gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             ModalDrawerSheet(drawerShape = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)) {
                 Text(

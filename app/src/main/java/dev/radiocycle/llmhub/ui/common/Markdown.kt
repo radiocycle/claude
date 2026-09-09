@@ -1,5 +1,6 @@
 package dev.radiocycle.llmhub.ui.common
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +19,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -73,6 +75,7 @@ private fun ParagraphBlock(lines: List<String>, color: androidx.compose.ui.graph
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CodeBlock(block: Block.Code) {
     val clipboard = LocalClipboardManager.current
@@ -108,6 +111,7 @@ private fun CodeBlock(block: Block.Code) {
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState())
+                    .systemGestureExclusion()
                     .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
             )
         }
@@ -123,6 +127,7 @@ private fun splitRow(line: String): List<String> = line
     .split('|')
     .map { it.trim() }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TableBlock(block: Block.Table) {
     val outline = MaterialTheme.colorScheme.outlineVariant
@@ -131,7 +136,11 @@ private fun TableBlock(block: Block.Table) {
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.horizontalScroll(rememberScrollState())) {
+        Column(
+            Modifier
+                .horizontalScroll(rememberScrollState())
+                .systemGestureExclusion()
+        ) {
             TableRow(block.header, header = true, outline = outline)
             block.rows.forEach { row -> TableRow(row, header = false, outline = outline) }
         }

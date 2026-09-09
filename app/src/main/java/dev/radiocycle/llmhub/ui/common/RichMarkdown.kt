@@ -3,9 +3,13 @@ package dev.radiocycle.llmhub.ui.common
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color as AndroidColor
+import android.graphics.Rect
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -28,7 +32,12 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.radiocycle.llmhub.core.AppJson
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -101,6 +110,12 @@ private class MarkdownWebView(context: Context) : WebView(context) {
     var onLinkClicked: (String) -> Unit = {}
 
     private val handler = Handler(Looper.getMainLooper())
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    /** Set from the page: true while a touch is inside a table, formula or code block that overflows. */
+    @Volatile private var overScrollableRegion = false
+    private var downX = 0f
+    private var downY = 0f
+    private var claimedGesture = false
     private var pageReady = false
     private var released = false
     private var appliedTheme: String? = null
@@ -132,6 +147,36 @@ private class MarkdownWebView(context: Context) : WebView(context) {
                 pushPending()
             }
         }
+    }
+
+    /**
+     * Wide content — tables, display math, long code lines — scrolls sideways inside the page. The
+     * surrounding Compose gestures would otherwise win that drag and open the drawer or scroll the
+     * list, so once a horizontal drag starts over such a region the gesture is claimed outright.
+     */
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
+                claimedGesture = false
+            }
+
+            MotionEvent.ACTION_MOVE -> if (!claimedGesture && overScrollableRegion) {
+                val dx = kotlin.math.abs(event.x - downX)
+                val dy = kotlin.math.abs(event.y - downY)
+                if (dx > touchSlop && dx > dy) {
+                    claimedGesture = true
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (claimedGesture) parent?.requestDisallowInterceptTouchEvent(false)
+                claimedGesture = false
+            }
+        }
+        return super.onTouchEvent(event)
     }
 
     fun start(theme: String, markdown: String) {
@@ -171,6 +216,26 @@ private class MarkdownWebView(context: Context) : WebView(context) {
         if (!released) runCatching { evaluateJavascript(script, null) }
     }
 
+    /**
+     * On a gesture-navigation device an edge swipe is the system back gesture, which would fire
+     * while panning a wide table near the screen edge. Excluding those bands hands the drag to the
+     * page instead. The platform caps how much of an edge an app may claim, so this only ever
+     * shrinks the system's share where it actually matters.
+     */
+    private fun applyExclusions(json: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val density = resources.displayMetrics.density
+        val rects = runCatching {
+            AppJson.parseToJsonElement(json).jsonArray.map { element ->
+                val entry = element.jsonObject
+                val top = (entry.getValue("top").jsonPrimitive.int * density).toInt()
+                val height = (entry.getValue("height").jsonPrimitive.int * density).toInt()
+                Rect(0, top, width, top + height)
+            }
+        }.getOrDefault(emptyList())
+        systemGestureExclusionRects = rects
+    }
+
     fun release() {
         released = true
         handler.removeCallbacks(flush)
@@ -196,6 +261,18 @@ private class MarkdownWebView(context: Context) : WebView(context) {
         @JavascriptInterface
         fun openUrl(url: String) {
             handler.post { if (!released) onLinkClicked(url) }
+        }
+
+        /** Called from the page on every touch, so the native side knows who owns a sideways drag. */
+        @JavascriptInterface
+        fun setOverScrollableRegion(value: Boolean) {
+            overScrollableRegion = value
+        }
+
+        /** Bounds of the regions that scroll sideways, as `[{top, height}]` in CSS pixels. */
+        @JavascriptInterface
+        fun setExclusions(json: String) {
+            handler.post { if (!released) applyExclusions(json) }
         }
     }
 
