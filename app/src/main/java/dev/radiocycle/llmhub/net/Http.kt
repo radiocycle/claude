@@ -1,6 +1,7 @@
 package dev.radiocycle.llmhub.net
 
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
@@ -20,12 +21,39 @@ object Http {
         .build()
 
     private val byTimeout = ConcurrentHashMap<Int, OkHttpClient>()
+    private val http1ByTimeout = ConcurrentHashMap<Int, OkHttpClient>()
 
     fun withTimeout(seconds: Int): OkHttpClient = byTimeout.getOrPut(seconds.coerceIn(5, 900)) {
         base.newBuilder()
             .readTimeout(seconds.toLong(), TimeUnit.SECONDS)
             .callTimeout(0, TimeUnit.SECONDS)
             .build()
+    }
+
+    fun http1WithTimeout(seconds: Int): OkHttpClient = http1ByTimeout.getOrPut(seconds.coerceIn(5, 900)) {
+        base.newBuilder()
+            .protocols(listOf(Protocol.HTTP_1_1))
+            .readTimeout(seconds.toLong(), TimeUnit.SECONDS)
+            .callTimeout(0, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
+     * Executes a request with automatic HTTP/1.1 fallback if HTTP/2 multiplexing,
+     * stale pool connections, or mobile VPN tunnels trigger a "connection closed" or "reset" error.
+     */
+    fun executeWithFallback(request: Request, timeoutSeconds: Int = 30): Response {
+        val client = withTimeout(timeoutSeconds)
+        return try {
+            client.newCall(request).execute()
+        } catch (e: IOException) {
+            val msg = e.message.orEmpty().lowercase()
+            if (msg.contains("closed") || msg.contains("reset") || msg.contains("unexpected end of stream") || msg.contains("eof")) {
+                http1WithTimeout(timeoutSeconds).newCall(request).execute()
+            } else {
+                throw e
+            }
+        }
     }
 }
 

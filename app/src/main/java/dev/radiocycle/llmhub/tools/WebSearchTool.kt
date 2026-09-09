@@ -209,7 +209,7 @@ class WebSearchTool(private val settings: SettingsRepository) : AgentTool {
             }
             .build()
 
-        val responseBody = Http.withTimeout(30).newCall(request).execute().use { response ->
+        val responseBody = Http.executeWithFallback(request, 30).use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 error("Firecrawl returned HTTP ${response.code}: ${body.take(300)}")

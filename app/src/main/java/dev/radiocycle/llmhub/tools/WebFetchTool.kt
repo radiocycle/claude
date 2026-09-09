@@ -56,7 +56,7 @@ class WebFetchTool(private val settings: SettingsRepository) : AgentTool {
             .build()
 
         runCatching {
-            Http.withTimeout(45).newCall(request).execute().use { response ->
+            Http.executeWithFallback(request, 45).use { response ->
                 val contentType = response.header("Content-Type").orEmpty()
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
@@ -102,7 +102,7 @@ class WebFetchTool(private val settings: SettingsRepository) : AgentTool {
             }
             .build()
 
-        val responseBody = Http.withTimeout(60).newCall(request).execute().use { response ->
+        val responseBody = Http.executeWithFallback(request, 60).use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 error("Firecrawl returned HTTP ${response.code}: ${body.take(300)}")
