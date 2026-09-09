@@ -1,5 +1,7 @@
 package dev.radiocycle.llmhub.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,47 +13,102 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.VpnKey
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.radiocycle.llmhub.data.model.BuiltInPresets
+import dev.radiocycle.llmhub.data.model.KeyScanner
 import dev.radiocycle.llmhub.data.model.RotationStrategy
 import dev.radiocycle.llmhub.data.model.SearchBackend
 import dev.radiocycle.llmhub.data.model.ThemeMode
 import dev.radiocycle.llmhub.data.repo.SettingsRepository
 import dev.radiocycle.llmhub.tools.RootAccess
 import dev.radiocycle.llmhub.tools.WorkspaceManager
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.material3.OutlinedButton
+import dev.radiocycle.llmhub.ui.providers.ProvidersViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun SettingsScreen(repository: SettingsRepository, workspace: WorkspaceManager) {
+fun SettingsScreen(
+    repository: SettingsRepository,
+    workspace: WorkspaceManager,
+    providersViewModel: ProvidersViewModel? = null,
+) {
     val settings by repository.settings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var scanSummary by remember { mutableStateOf<KeyScanner.ScanSummary?>(null) }
+    var showInputModal by remember { mutableStateOf(false) }
+    var manualText by remember { mutableStateOf("") }
+    var importStatusMessage by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val bulkFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val content = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val buffer = CharArray(1024 * 1024 * 4)
+                val read = stream.bufferedReader(Charsets.UTF_8).read(buffer)
+                if (read > 0) String(buffer, 0, read) else ""
+            }
+        }.getOrNull()
+
+        if (content.isNullOrBlank()) {
+            errorMessage = "The selected file is empty or could not be read"
+            return@rememberLauncherForActivityResult
+        }
+        if (content.contains('\u0000')) {
+            errorMessage = "The selected file appears to be binary, not text"
+            return@rememberLauncherForActivityResult
+        }
+
+        val summary = KeyScanner.scan(content)
+        if (summary.totalKeysFound == 0) {
+            errorMessage = "No API keys recognized in file for basic providers."
+        } else {
+            scanSummary = summary
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -189,6 +246,74 @@ fun SettingsScreen(repository: SettingsRepository, workspace: WorkspaceManager) 
                     repository.update { it.copy(rotation = it.rotation.copy(rotateOnModelMissing = enabled)) }
                 },
             )
+
+            if (providersViewModel != null) {
+                Section("Providers & Keys")
+
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Rounded.VpnKey,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 12.dp),
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "Bulk Add keys for basic providers",
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    "Auto-detect keys for OpenAI, Anthropic, Gemini, Groq, OpenRouter, xAI, Perplexity, Cerebras, Together, Fireworks (без custom и local)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Button(
+                                onClick = { bulkFilePickerLauncher.launch(arrayOf("*/*")) },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.FileUpload,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("Select file")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    manualText = ""
+                                    showInputModal = true
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.EditNote,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("Paste text")
+                            }
+                        }
+                    }
+                }
+            }
 
             Section("Tools")
 
@@ -438,6 +563,194 @@ fun SettingsScreen(repository: SettingsRepository, workspace: WorkspaceManager) 
             )
             Spacer(Modifier.height(32.dp))
         }
+    }
+
+    if (showInputModal) {
+        AlertDialog(
+            onDismissRequest = { showInputModal = false },
+            title = { Text("Bulk Add keys for basic providers") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Paste raw keys, .env, or text containing API keys. Keys will be auto-detected by regex and routed to basic providers (custom & local excluded).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = manualText,
+                        onValueChange = { manualText = it },
+                        placeholder = { Text("sk-ant-...\nsk-proj-...\nAIza...\ngsk_...") },
+                        minLines = 5,
+                        maxLines = 10,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val summary = KeyScanner.scan(manualText)
+                        showInputModal = false
+                        if (summary.totalKeysFound == 0) {
+                            errorMessage = "No recognized API keys found."
+                        } else {
+                            scanSummary = summary
+                        }
+                    },
+                    enabled = manualText.isNotBlank(),
+                ) {
+                    Text("Scan keys")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showInputModal = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+
+    val currentScan = scanSummary
+    if (currentScan != null) {
+        AlertDialog(
+            onDismissRequest = { scanSummary = null },
+            title = {
+                Text("Found ${currentScan.totalKeysFound} key${if (currentScan.totalKeysFound > 1) "s" else ""}")
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (currentScan.keysByPreset.isEmpty()) {
+                        Text(
+                            "No recognized keys found for basic providers.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else {
+                        Text(
+                            "Recognized basic providers:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        currentScan.keysByPreset.forEach { (presetId, keys) ->
+                            val presetName = BuiltInPresets.byId(presetId)?.name ?: presetId
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            presetName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        val sample = keys.firstOrNull()?.let { k ->
+                                            if (k.length <= 12) k else k.take(6) + "…" + k.takeLast(4)
+                                        } ?: ""
+                                        Text(
+                                            "e.g. $sample",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    SuggestionChip(
+                                        onClick = {},
+                                        label = { Text("${keys.size} key${if (keys.size > 1) "s" else ""}") },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (currentScan.unrecognizedKeys.isNotEmpty()) {
+                        Text(
+                            "${currentScan.unrecognizedKeys.size} unrecognized / non-basic keys skipped.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    if (currentScan.keysByPreset.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Do you want to append these keys to existing providers or replace them?",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (currentScan.keysByPreset.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                val added = providersViewModel?.bulkAddKeys(currentScan.keysByPreset, append = true) ?: 0
+                                val countProviders = currentScan.keysByPreset.size
+                                scanSummary = null
+                                importStatusMessage = "Successfully added $added keys across $countProviders providers (Appended)."
+                            },
+                        ) {
+                            Text("Append")
+                        }
+                        Button(
+                            onClick = {
+                                val added = providersViewModel?.bulkAddKeys(currentScan.keysByPreset, append = false) ?: 0
+                                val countProviders = currentScan.keysByPreset.size
+                                scanSummary = null
+                                importStatusMessage = "Successfully updated $added keys across $countProviders providers (Replaced)."
+                            },
+                        ) {
+                            Text("Replace")
+                        }
+                    }
+                } else {
+                    TextButton(onClick = { scanSummary = null }) {
+                        Text("Close")
+                    }
+                }
+            },
+            dismissButton = {
+                if (currentScan.keysByPreset.isNotEmpty()) {
+                    TextButton(onClick = { scanSummary = null }) {
+                        Text("Cancel")
+                    }
+                }
+            },
+        )
+    }
+
+    if (errorMessage != null) {
+        AlertDialog(
+            onDismissRequest = { errorMessage = null },
+            title = { Text("Import Error") },
+            text = { Text(errorMessage.orEmpty()) },
+            confirmButton = {
+                TextButton(onClick = { errorMessage = null }) {
+                    Text("OK")
+                }
+            },
+        )
+    }
+
+    if (importStatusMessage != null) {
+        AlertDialog(
+            onDismissRequest = { importStatusMessage = null },
+            title = { Text("Keys Imported") },
+            text = { Text(importStatusMessage.orEmpty()) },
+            confirmButton = {
+                TextButton(onClick = { importStatusMessage = null }) {
+                    Text("OK")
+                }
+            },
+        )
     }
 }
 

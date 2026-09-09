@@ -98,6 +98,7 @@ fun AppShell(container: AppContainer) {
                     Tab.SETTINGS -> SettingsScreen(
                         repository = container.settings,
                         workspace = container.workspace,
+                        providersViewModel = providersViewModel,
                     )
                 }
             }

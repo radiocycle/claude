@@ -3,6 +3,7 @@ package dev.radiocycle.llmhub.ui.providers
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.radiocycle.llmhub.AppContainer
+import dev.radiocycle.llmhub.data.model.BuiltInPresets
 import dev.radiocycle.llmhub.data.model.Endpoint
 import dev.radiocycle.llmhub.data.model.EndpointHealth
 import dev.radiocycle.llmhub.data.model.Provider
@@ -59,6 +60,41 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         val existing = if (append) provider.keys else emptyList()
         val combined = (existing + newKeys).distinct()
         container.providers.upsert(provider.copy(apiKey = combined.joinToString("\n")))
+    }
+
+    /**
+     * Distributes bulk-scanned keys to basic providers (excluding custom & local).
+     * If a matching provider exists, it updates its keys.
+     * If not, it creates a new provider from the built-in preset.
+     */
+    fun bulkAddKeys(keysByPreset: Map<String, List<String>>, append: Boolean): Int {
+        var count = 0
+        keysByPreset.forEach { (presetId, newKeys) ->
+            if (presetId == "custom" || presetId == Provider.PRESET_LOCAL || newKeys.isEmpty()) return@forEach
+            val preset = BuiltInPresets.byId(presetId) ?: return@forEach
+
+            val existing = container.providers.providers.value.firstOrNull {
+                it.presetId == presetId || (it.presetId == null && it.name.equals(preset.name, ignoreCase = true))
+            }
+
+            if (existing != null) {
+                val combined = if (append) (existing.keys + newKeys).distinct() else newKeys.distinct()
+                container.providers.upsert(
+                    existing.copy(
+                        apiKey = combined.joinToString("\n"),
+                        enabled = true,
+                    )
+                )
+            } else {
+                val newProvider = preset.toProvider(container.providers.providers.value.size).copy(
+                    apiKey = newKeys.distinct().joinToString("\n"),
+                    enabled = true,
+                )
+                container.providers.upsert(newProvider)
+            }
+            count += newKeys.size
+        }
+        return count
     }
 
     fun saveDraft(): Boolean {
