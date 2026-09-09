@@ -68,6 +68,7 @@ class ChatController(
                     _status.value = statusOf(conversationId, title, messages)
                 }
                 conversations.setMessages(conversationId, history + produced)
+                _live.value = null
                 _status.value = _status.value.copy(
                     active = false,
                     phase = Phase.Done,
@@ -76,13 +77,14 @@ class ChatController(
             } catch (cancelled: CancellationException) {
                 // User stopped: keep whatever streamed, report no completion.
                 conversations.setMessages(conversationId, history + produced)
+                _live.value = null
                 _status.value = GenerationStatus(conversationId = conversationId, title = title)
                 throw cancelled
             } catch (t: Throwable) {
                 val withError = history + produced +
                     ChatMessage(role = Role.ASSISTANT, error = t.message ?: "Request failed")
-                _live.value = LiveTurn(conversationId, withError)
                 conversations.setMessages(conversationId, withError)
+                _live.value = null
                 _status.value = _status.value.copy(
                     active = false,
                     phase = Phase.Failed,
@@ -90,6 +92,7 @@ class ChatController(
                     finishedAt = System.currentTimeMillis(),
                 )
             } finally {
+                _live.value = null
                 job = null
             }
         }
@@ -99,6 +102,7 @@ class ChatController(
     fun stop() {
         job?.cancel()
         job = null
+        _live.value = null
         if (_status.value.active) {
             _status.value = _status.value.copy(active = false, phase = Phase.Idle)
         }

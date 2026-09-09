@@ -131,9 +131,12 @@ class ChatViewModel(private val container: AppContainer) : ViewModel() {
 
         val open = _open.value
         val conversationId = open.conversationId ?: container.conversations.create().id
-        if (open.conversationId == null) _open.update { it.copy(conversationId = conversationId) }
+        if (open.conversationId == null) {
+            _open.update { it.copy(conversationId = conversationId) }
+        }
 
-        val current = state.value.messages
+        val conversation = container.conversations.byId(conversationId)
+        val current = conversation?.messages.orEmpty()
         val history = current + ChatMessage(role = Role.USER, content = prompt)
         container.conversations.setMessages(conversationId, history)
         _open.update { it.copy(notice = null) }
@@ -144,16 +147,23 @@ class ChatViewModel(private val container: AppContainer) : ViewModel() {
 
     fun retryLast() {
         if (controller.isActive) return
-        val messages = state.value.messages
+        val conversationId = _open.value.conversationId ?: return
+        val conversation = container.conversations.byId(conversationId) ?: return
+        val messages = conversation.messages
         val lastUser = messages.indexOfLast { it.role == Role.USER }
         if (lastUser < 0) return
         val prompt = messages[lastUser].content
         val trimmed = messages.take(lastUser)
-        val conversationId = _open.value.conversationId ?: return
         container.conversations.setMessages(conversationId, trimmed)
         val history = trimmed + ChatMessage(role = Role.USER, content = prompt)
         container.conversations.setMessages(conversationId, history)
         controller.send(conversationId, history, _open.value.pinnedProviderId, _open.value.pinnedModel)
+    }
+
+    fun deleteAllConversations() {
+        if (controller.isActive) controller.stop()
+        container.conversations.deleteAll()
+        newChat()
     }
 
     private fun persistPin() {

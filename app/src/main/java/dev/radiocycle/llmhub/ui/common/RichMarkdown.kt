@@ -194,8 +194,10 @@ private class MarkdownWebView(context: Context) : WebView(context) {
     fun applyMarkdown(markdown: String) {
         if (markdown == appliedMarkdown) return
         pendingMarkdown = markdown
+        val isContinuation = appliedMarkdown != null && markdown.startsWith(appliedMarkdown!!)
         val elapsed = System.currentTimeMillis() - lastPushAt
-        if (elapsed >= THROTTLE_MS) {
+        if (!isContinuation || elapsed >= THROTTLE_MS) {
+            handler.removeCallbacks(flush)
             pushPending()
         } else {
             handler.removeCallbacks(flush)

@@ -25,10 +25,12 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -52,6 +54,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -78,6 +81,31 @@ fun ChatScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showModelPicker by remember { mutableStateOf(false) }
+    var showClearAllConfirm by remember { mutableStateOf(false) }
+
+    if (showClearAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearAllConfirm = false },
+            title = { Text("Clear all chats?") },
+            text = { Text("This will delete all conversations and start a fresh chat.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteAllConversations()
+                        showClearAllConfirm = false
+                        scope.launch { drawerState.close() }
+                    },
+                ) {
+                    Text("Clear all", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -86,11 +114,27 @@ fun ChatScreen(
         gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             ModalDrawerSheet(drawerShape = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)) {
-                Text(
-                    "Conversations",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(24.dp),
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 24.dp, end = 12.dp, top = 20.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Conversations",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    if (conversations.isNotEmpty()) {
+                        IconButton(onClick = { showClearAllConfirm = true }) {
+                            Icon(
+                                Icons.Rounded.DeleteSweep,
+                                contentDescription = "Clear all chats",
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
                 NavigationDrawerItem(
                     label = { Text("New chat") },
                     icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
@@ -102,7 +146,7 @@ fun ChatScreen(
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                LazyColumn {
+                LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
                     items(conversations, key = { it.id }) { conversation ->
                         NavigationDrawerItem(
                             label = { Text(conversation.title, maxLines = 1) },
@@ -119,6 +163,27 @@ fun ChatScreen(
                             modifier = Modifier.padding(horizontal = 12.dp),
                         )
                     }
+                }
+                if (conversations.size > 1) {
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    NavigationDrawerItem(
+                        label = {
+                            Text(
+                                "Clear all chats",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        icon = {
+                            Icon(
+                                Icons.Rounded.DeleteSweep,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        selected = false,
+                        onClick = { showClearAllConfirm = true },
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                    )
                 }
             }
         },
@@ -162,13 +227,15 @@ fun ChatScreen(
             },
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
-                if (state.messages.isEmpty()) {
-                    EmptyState(
-                        hasProviders = providers.any { it.enabled },
-                        onOpenProviders = onOpenProviders,
-                    )
-                } else {
-                    MessageList(state, richRendering = settings.richRendering)
+                key(state.conversationId) {
+                    if (state.messages.isEmpty()) {
+                        EmptyState(
+                            hasProviders = providers.any { it.enabled },
+                            onOpenProviders = onOpenProviders,
+                        )
+                    } else {
+                        MessageList(state, richRendering = settings.richRendering)
+                    }
                 }
 
                 state.notice?.let { notice ->
