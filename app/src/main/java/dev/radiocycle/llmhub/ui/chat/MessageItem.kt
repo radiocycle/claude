@@ -60,6 +60,8 @@ fun MessageItem(
     isLast: Boolean,
     isStreaming: Boolean,
     richRendering: Boolean,
+    showProviderBadge: Boolean = true,
+    hasSubsequentToolResult: Boolean = false,
 ) {
     when (message.role) {
         Role.USER -> UserMessage(message)
@@ -68,6 +70,8 @@ fun MessageItem(
             message = message,
             showCursor = isLast && isStreaming,
             richRendering = richRendering,
+            showProviderBadge = showProviderBadge,
+            hasSubsequentToolResult = hasSubsequentToolResult,
         )
         Role.SYSTEM -> Unit
     }
@@ -92,9 +96,15 @@ private fun UserMessage(message: ChatMessage) {
 }
 
 @Composable
-private fun AssistantMessage(message: ChatMessage, showCursor: Boolean, richRendering: Boolean) {
+private fun AssistantMessage(
+    message: ChatMessage,
+    showCursor: Boolean,
+    richRendering: Boolean,
+    showProviderBadge: Boolean,
+    hasSubsequentToolResult: Boolean,
+) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (message.providerName != null) {
+        if (showProviderBadge && message.providerName != null) {
             ProviderBadge(message.providerName, message.model)
         }
 
@@ -120,9 +130,9 @@ private fun AssistantMessage(message: ChatMessage, showCursor: Boolean, richRend
             Text("▍", style = MaterialTheme.typography.bodyLarge)
         }
 
-        message.toolCalls.takeIf { it.isNotEmpty() }?.let { calls ->
+        if (!hasSubsequentToolResult && message.toolCalls.isNotEmpty()) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                calls.forEach { call -> ToolChip(call.name) }
+                message.toolCalls.forEach { call -> ToolChip(call.name) }
             }
         }
 
