@@ -1,6 +1,11 @@
 package dev.radiocycle.llmhub.ui.chat
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,10 +23,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Delete
@@ -44,6 +51,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,12 +61,14 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
@@ -298,39 +308,130 @@ private fun ActiveRouteLabel(state: ChatUiState, providers: List<Provider>) {
 @Composable
 private fun MessageList(state: ChatUiState, richRendering: Boolean) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var autoScroll by remember { mutableStateOf(true) }
+    val isDragged by listState.interactionSource.collectIsDraggedAsState()
 
-    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.content?.length) {
-        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
+    val canScrollForward by remember {
+        derivedStateOf { listState.canScrollForward }
     }
 
-    LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        items(state.messages, key = { it.id }) { message ->
-            MessageItem(
-                message = message,
-                isLast = message.id == state.messages.lastOrNull()?.id,
-                isStreaming = state.isStreaming,
-                richRendering = richRendering,
-            )
+    // Pause autoScroll immediately if the user touches and drags away from the bottom
+    LaunchedEffect(listState) {
+        snapshotFlow { isDragged to listState.canScrollForward }
+            .collect { (dragged, canForward) ->
+                if (dragged && canForward) {
+                    autoScroll = false
+                }
+            }
+    }
+
+    // Resume autoScroll when user scrolls back to the very bottom and stops
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (inProgress, canForward) ->
+                if (!inProgress && !canForward) {
+                    autoScroll = true
+                }
+            }
+    }
+
+    // On new message (e.g. user sends message), re-enable auto-scroll and scroll down
+    var lastMessageCount by remember { mutableStateOf(state.messages.size) }
+    LaunchedEffect(state.messages.size) {
+        if (state.messages.size > lastMessageCount) {
+            autoScroll = true
+            val target = state.messages.size + if (state.isStreaming) 1 else 0
+            listState.animateScrollToItem(target)
         }
-        if (state.isStreaming) {
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.size(10.dp))
-                    Text(
-                        "Working…",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        lastMessageCount = state.messages.size
+    }
+
+    // When opening a chat with messages, instantly place viewport at the bottom
+    LaunchedEffect(Unit) {
+        if (state.messages.isNotEmpty()) {
+            val target = state.messages.size + if (state.isStreaming) 1 else 0
+            listState.scrollToItem(target)
+        }
+    }
+
+    // Follow streaming output IF auto-scroll is active and user is not touching/scrolling
+    LaunchedEffect(state.messages.lastOrNull()?.content?.length, state.isStreaming) {
+        if (autoScroll && !isDragged && !listState.isScrollInProgress && state.messages.isNotEmpty()) {
+            val target = state.messages.size + if (state.isStreaming) 1 else 0
+            listState.scrollToItem(target)
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            items(state.messages, key = { it.id }) { message ->
+                MessageItem(
+                    message = message,
+                    isLast = message.id == state.messages.lastOrNull()?.id,
+                    isStreaming = state.isStreaming,
+                    richRendering = richRendering,
+                )
+            }
+            if (state.isStreaming) {
+                item(key = "streaming_indicator") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.size(10.dp))
+                        Text(
+                            "Working…",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            item(key = "bottom_spacer") { Spacer(Modifier.height(24.dp)) }
+        }
+
+        AnimatedVisibility(
+            visible = canScrollForward,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut() + scaleOut(),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 12.dp),
+        ) {
+            SmallFloatingActionButton(
+                onClick = {
+                    autoScroll = true
+                    scope.launch {
+                        val target = state.messages.size + if (state.isStreaming) 1 else 0
+                        listState.animateScrollToItem(target)
+                    }
+                },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.primary,
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.ArrowDownward,
+                        contentDescription = "Scroll to bottom",
+                        modifier = Modifier.size(20.dp),
                     )
+                    if (state.isStreaming) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .size(6.dp)
+                                .align(Alignment.TopEnd),
+                        ) {}
+                    }
                 }
             }
         }
-        item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
