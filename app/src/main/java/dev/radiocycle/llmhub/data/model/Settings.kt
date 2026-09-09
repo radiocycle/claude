@@ -66,6 +66,23 @@ data class ToolSettings(
     val fetchCharLimit: Int = 20000,
     val jsTimeoutMs: Long = 5000,
     val maxToolIterations: Int = 8,
+
+    // --- Filesystem + shell -----------------------------------------------------------------
+    /** Absolute path of the agent's working directory. Blank means the app-private default. */
+    val workspacePath: String = "",
+    /** Offer read_file / write_file / edit_file / delete_file / list_files. */
+    val fileToolsEnabled: Boolean = true,
+    /**
+     * Confine file tools and the shell's own path resolution to the workspace. When on, an absolute
+     * path or a `..` that climbs out of the workspace is refused. Turn off for a full-device agent.
+     */
+    val restrictToWorkspace: Boolean = true,
+    /** Offer the shell tool. Off by default — it runs real commands on the device. */
+    val shellEnabled: Boolean = false,
+    /** Run shell commands through `su` when the device is rooted and access is granted. */
+    val shellUseRoot: Boolean = false,
+    val shellTimeoutMs: Long = 30000,
+    val fileReadCharLimit: Int = 60000,
 )
 
 @Serializable

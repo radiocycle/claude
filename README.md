@@ -67,6 +67,8 @@ rather than another round of calls.
 | `web_search` | Ranked results via DuckDuckGo (keyless default), Tavily, Brave or a SearXNG instance |
 | `web_fetch` | Fetches a URL and extracts readable text from the HTML |
 | `exec_js` | Evaluates JavaScript in an off-screen WebView — no network, no filesystem, console captured, promises awaited, hard timeout |
+| `read_file` `write_file` `edit_file` `delete_file` `list_files` | opencode-style file tools that operate in the agent's workspace directory |
+| `shell` | Runs a shell command in the workspace — through `su` on a rooted device when enabled |
 
 **Markdown and LaTeX.** Replies render through [marked](https://marked.js.org) and
 [KaTeX](https://katex.org), both vendored into `assets/render` so nothing is fetched at runtime:
@@ -81,6 +83,24 @@ inside the list, and content pushes are throttled because a streaming reply chan
 A lighter built-in renderer (headings, emphasis, code, lists, tables) is available behind
 Settings → Appearance if you would rather not run the WebView path.
 
+**Workspace, files and shell.** File and shell tools operate in a *workspace* directory set in
+Settings → Workspace & shell. Blank means an app-private folder that is always readable and
+writable with no runtime permission; it can also point at shared storage or, on a rooted device,
+anywhere.
+
+- The five file tools mirror opencode: `read_file` returns numbered lines, `write_file` writes a
+  file whole, `edit_file` replaces an exact unique snippet (or every occurrence with `replace_all`),
+  `delete_file` removes a file or, with `recursive`, a tree, and `list_files` lists a directory.
+  Relative paths resolve against the workspace; absolute paths are allowed. With **Restrict to
+  workspace** on (the default) a path that climbs out with `..` or an absolute path is refused, so a
+  confined agent cannot escape its directory.
+- `shell` runs a command line in the workspace and returns combined stdout/stderr and the exit
+  code. Android ships a POSIX shell, so `ls`, `cat`, `grep`, `find` and pipelines work in the app's
+  own sandbox. Turn on **Run shell as root** and, on a rooted device, commands run through `su` with
+  full-filesystem reach; the toggle shows whether a `su` grant is actually available. State does not
+  carry between calls, so steps are chained with `&&` inside one command. The shell is off by
+  default — it runs real commands on the device.
+
 ## Architecture
 
 ```
@@ -90,6 +110,7 @@ data/repo       Provider / Conversation / Settings repositories
 net             LlmClient + OpenAiClient, AnthropicClient, GoogleClient, SSE reader, error taxonomy
 rotation        RotationEngine (endpoint choice, health, handoff), ChatEngine (agent loop)
 tools           AgentTool, ToolRegistry, WebSearchTool, WebFetchTool, ExecJsTool, JsSandbox
+                WorkspaceManager + RootAccess, ShellTool, file tools (read/write/edit/delete/list)
 ui              Compose screens: chat, providers, provider editor, settings
 assets/render   Bundled marked + KaTeX renderer used for replies
 ```

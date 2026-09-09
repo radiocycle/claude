@@ -37,11 +37,20 @@ import dev.radiocycle.llmhub.data.model.RotationStrategy
 import dev.radiocycle.llmhub.data.model.SearchBackend
 import dev.radiocycle.llmhub.data.model.ThemeMode
 import dev.radiocycle.llmhub.data.repo.SettingsRepository
+import dev.radiocycle.llmhub.tools.RootAccess
+import dev.radiocycle.llmhub.tools.WorkspaceManager
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.OutlinedButton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun SettingsScreen(repository: SettingsRepository) {
+fun SettingsScreen(repository: SettingsRepository, workspace: WorkspaceManager) {
     val settings by repository.settings.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -207,6 +216,22 @@ fun SettingsScreen(repository: SettingsRepository) {
                     repository.update { it.copy(tools = it.tools.copy(execJsEnabled = enabled)) }
                 },
             )
+            ToggleRow(
+                title = "File tools",
+                subtitle = "read_file, write_file, edit_file, delete_file, list_files",
+                checked = settings.tools.fileToolsEnabled,
+                onChange = { enabled ->
+                    repository.update { it.copy(tools = it.tools.copy(fileToolsEnabled = enabled)) }
+                },
+            )
+            ToggleRow(
+                title = "shell",
+                subtitle = "Run real shell commands on the device — grant carefully",
+                checked = settings.tools.shellEnabled,
+                onChange = { enabled ->
+                    repository.update { it.copy(tools = it.tools.copy(shellEnabled = enabled)) }
+                },
+            )
 
             Text(
                 "Search backend",
@@ -266,6 +291,83 @@ fun SettingsScreen(repository: SettingsRepository) {
                 steps = 0,
                 onChange = { value ->
                     repository.update { it.copy(tools = it.tools.copy(jsTimeoutMs = value.toLong())) }
+                },
+            )
+
+            Section("Workspace & shell")
+
+            val defaultWorkspace = remember { workspace.defaultRoot().absolutePath }
+            OutlinedTextField(
+                value = settings.tools.workspacePath,
+                onValueChange = { path ->
+                    repository.update { it.copy(tools = it.tools.copy(workspacePath = path.trim())) }
+                },
+                label = { Text("Workspace directory") },
+                placeholder = { Text(defaultWorkspace) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = if (settings.tools.workspacePath.isBlank()) {
+                    "Blank → app-private default: $defaultWorkspace"
+                } else {
+                    "File tools resolve relative paths here; the shell starts here."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    repository.update { it.copy(tools = it.tools.copy(workspacePath = "")) }
+                }) { Text("App files (default)") }
+                OutlinedButton(onClick = {
+                    repository.update {
+                        it.copy(tools = it.tools.copy(workspacePath = workspace.sharedStorageRoot().absolutePath))
+                    }
+                }) { Text("Shared storage") }
+            }
+
+            ToggleRow(
+                title = "Restrict to workspace",
+                subtitle = "Refuse file paths that climb outside the workspace. Turn off for a " +
+                    "full-device agent.",
+                checked = settings.tools.restrictToWorkspace,
+                onChange = { enabled ->
+                    repository.update { it.copy(tools = it.tools.copy(restrictToWorkspace = enabled)) }
+                },
+            )
+
+            // Root status is probed once, off the main thread — the probe itself may prompt.
+            var rootState by remember { mutableStateOf<Boolean?>(null) }
+            LaunchedEffect(settings.tools.shellUseRoot) {
+                if (settings.tools.shellUseRoot) {
+                    rootState = withContext(Dispatchers.IO) { RootAccess.isGranted() }
+                } else {
+                    rootState = null
+                }
+            }
+            ToggleRow(
+                title = "Run shell as root",
+                subtitle = when {
+                    !RootAccess.binaryPresent() -> "No su binary found — device does not appear rooted"
+                    rootState == true -> "Root granted — shell runs with su"
+                    rootState == false -> "su present but access was denied"
+                    else -> "Use su so the shell reaches the whole filesystem"
+                },
+                checked = settings.tools.shellUseRoot,
+                onChange = { enabled ->
+                    RootAccess.invalidate()
+                    repository.update { it.copy(tools = it.tools.copy(shellUseRoot = enabled)) }
+                },
+            )
+            SliderRow(
+                label = "Shell timeout",
+                value = settings.tools.shellTimeoutMs.toFloat(),
+                valueLabel = "${settings.tools.shellTimeoutMs / 1000}s",
+                range = 1_000f..600_000f,
+                steps = 0,
+                onChange = { value ->
+                    repository.update { it.copy(tools = it.tools.copy(shellTimeoutMs = value.toLong())) }
                 },
             )
 

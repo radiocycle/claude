@@ -10,21 +10,25 @@ import kotlinx.serialization.json.jsonObject
 /** Owns the tool instances and decides which of them the model is offered on a given turn. */
 class ToolRegistry(
     private val settings: SettingsRepository,
-    webSearch: WebSearchTool,
-    webFetch: WebFetchTool,
-    execJs: ExecJsTool,
+    tools: List<AgentTool>,
 ) {
-    private val tools: Map<String, AgentTool> = listOf(webSearch, webFetch, execJs)
-        .associateBy { it.spec.name }
+    private val tools: Map<String, AgentTool> = tools.associateBy { it.spec.name }
 
     /** Specs for the tools currently switched on in settings. */
     fun activeSpecs(): List<ToolSpec> {
-        val toolSettings = settings.current.tools
-        return buildList {
-            if (toolSettings.webSearchEnabled) tools["web_search"]?.let { add(it.spec) }
-            if (toolSettings.webFetchEnabled) tools["web_fetch"]?.let { add(it.spec) }
-            if (toolSettings.execJsEnabled) tools["exec_js"]?.let { add(it.spec) }
+        val t = settings.current.tools
+        val enabled = buildSet {
+            if (t.webSearchEnabled) add("web_search")
+            if (t.webFetchEnabled) add("web_fetch")
+            if (t.execJsEnabled) add("exec_js")
+            if (t.fileToolsEnabled) addAll(FILE_TOOLS)
+            if (t.shellEnabled) add("shell")
         }
+        return tools.values.filter { it.spec.name in enabled }.map { it.spec }
+    }
+
+    private companion object {
+        val FILE_TOOLS = setOf("read_file", "write_file", "edit_file", "delete_file", "list_files")
     }
 
     suspend fun run(call: ToolCall): ToolResult {

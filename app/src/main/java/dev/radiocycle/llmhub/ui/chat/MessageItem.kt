@@ -20,6 +20,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.NoteAdd
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -283,6 +289,12 @@ private fun iconForTool(name: String): ImageVector = when (name) {
     "web_search" -> Icons.Rounded.Search
     "web_fetch" -> Icons.Rounded.Language
     "exec_js" -> Icons.Rounded.Code
+    "shell" -> Icons.Rounded.Terminal
+    "read_file" -> Icons.Rounded.Description
+    "write_file" -> Icons.Rounded.NoteAdd
+    "edit_file" -> Icons.Rounded.EditNote
+    "delete_file" -> Icons.Rounded.DeleteOutline
+    "list_files" -> Icons.Rounded.FolderOpen
     else -> Icons.Rounded.Bolt
 }
 

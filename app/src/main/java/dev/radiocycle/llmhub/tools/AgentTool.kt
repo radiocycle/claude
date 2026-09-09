@@ -39,3 +39,8 @@ fun JsonObjectBuilder.intProp(name: String, description: String) = putJsonObject
     put("type", "integer")
     put("description", description)
 }
+
+fun JsonObjectBuilder.putBool(name: String, description: String) = putJsonObject(name) {
+    put("type", "boolean")
+    put("description", description)
+}
