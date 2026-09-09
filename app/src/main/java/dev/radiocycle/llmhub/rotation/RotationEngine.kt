@@ -1,6 +1,7 @@
 package dev.radiocycle.llmhub.rotation
 
 import android.util.Log
+import dev.radiocycle.llmhub.data.model.Endpoint
 import dev.radiocycle.llmhub.data.model.EndpointHealth
 import dev.radiocycle.llmhub.data.model.Provider
 import dev.radiocycle.llmhub.data.model.RotationSettings
@@ -24,7 +25,7 @@ import kotlin.math.min
 import kotlin.random.Random
 
 sealed interface RotationEvent {
-    data class Started(val provider: Provider, val model: String, val attempt: Int) : RotationEvent
+    data class Started(val endpoint: Endpoint, val model: String, val attempt: Int) : RotationEvent
     data class Text(val text: String) : RotationEvent
     data class Reasoning(val text: String) : RotationEvent
     data class Tools(val calls: List<ToolCall>) : RotationEvent
@@ -35,14 +36,22 @@ sealed interface RotationEvent {
         val reason: String,
         val resumed: Boolean,
     ) : RotationEvent
-    data class Finished(val provider: Provider, val model: String, val usage: TokenUsage?) : RotationEvent
+    data class Finished(val endpoint: Endpoint, val model: String, val usage: TokenUsage?) : RotationEvent
     data class Failed(val message: String, val attempts: Int) : RotationEvent
 }
 
 /**
- * Picks an endpoint, streams from it, and — when it dies — moves the same turn onto the next
- * healthy endpoint. If tokens were already delivered, the partial answer is handed over as a
- * prefill so the user sees one continuous reply rather than a restart.
+ * Schedules one turn across every provider+key pair available, streams from the chosen one, and
+ * moves the same turn onward when it fails.
+ *
+ * Two rules shape the behaviour:
+ *
+ * 1. **Credential failures are silent.** 401, 402, 403 and 429 say something about the key, not the
+ *    request, so the engine walks to the next key — of the same provider first, then of the next
+ *    provider — without emitting anything. Nothing reaches the user until the entire pool is spent,
+ *    and these attempts do not consume the retry budget, which exists for flaky transports.
+ * 2. **Partial answers carry over.** If tokens were already delivered, the text so far is handed to
+ *    the next endpoint as a prefill, so the reply continues rather than restarting.
  */
 class RotationEngine(
     private val providers: ProviderRepository,
@@ -53,8 +62,8 @@ class RotationEngine(
 
     private val roundRobinCursor = AtomicInteger(0)
 
-    fun healthOf(providerId: String): EndpointHealth =
-        _health.value[providerId] ?: EndpointHealth(providerId)
+    fun healthOf(endpointId: String): EndpointHealth =
+        _health.value[endpointId] ?: EndpointHealth(endpointId)
 
     fun clearHealth() {
         _health.value = emptyMap()
@@ -62,7 +71,9 @@ class RotationEngine(
 
     fun stream(request: ChatRequest, pinnedProviderId: String? = null): Flow<RotationEvent> = flow {
         val config = settings.current.rotation
-        val pool = providers.rotationPool()
+        val pool = providers.rotationPool().flatMap { provider ->
+            (0 until provider.keySlotCount).map { Endpoint(provider, it) }
+        }
         if (pool.isEmpty()) {
             emit(RotationEvent.Failed("No providers configured. Add one in the Providers tab.", 0))
             return@flow
@@ -71,17 +82,20 @@ class RotationEngine(
         val tried = mutableSetOf<String>()
         val partial = StringBuilder()
         var attempt = 0
-        var lastProvider: Provider? = null
+        var budgetSpent = 0
+        var lastEndpoint: Endpoint? = null
         var lastError: String? = null
+        var credentialFailures = 0
 
-        while (attempt < config.maxAttempts) {
-            val provider = pick(pool, tried, pinnedProviderId, attempt, config)
-            if (provider == null) {
+        while (true) {
+            val endpoint = pick(pool, tried, pinnedProviderId, config)
+            if (endpoint == null) {
                 lastError = lastError ?: "Every provider is unavailable or cooling down."
                 break
             }
-            tried += provider.id
+            tried += endpoint.id
             attempt++
+            val provider = endpoint.provider
 
             val model = provider.modelOrDefault(
                 if (provider.id == pinnedProviderId) request.model else null
@@ -89,21 +103,22 @@ class RotationEngine(
 
             if (model.isBlank()) {
                 lastError = "${provider.name} has no model configured."
-                markFailure(provider, lastError, config)
+                markFailure(endpoint, lastError, config)
                 continue
             }
 
-            lastProvider?.let { previous ->
+            // Only a change of provider is worth telling the user about; walking a key pool is not.
+            lastEndpoint?.takeIf { it.provider.id != provider.id }?.let { previous ->
                 emit(
                     RotationEvent.Switched(
-                        from = previous,
+                        from = previous.provider,
                         to = provider,
                         reason = lastError.orEmpty(),
                         resumed = partial.isNotEmpty(),
                     )
                 )
             }
-            emit(RotationEvent.Started(provider, model, attempt))
+            emit(RotationEvent.Started(endpoint, model, attempt))
 
             val attemptRequest = request.copy(
                 model = model,
@@ -114,7 +129,7 @@ class RotationEngine(
             val startedAt = System.currentTimeMillis()
             try {
                 var usage: TokenUsage? = null
-                ClientFactory.forMode(provider.apiMode).stream(provider, attemptRequest).collect { event ->
+                ClientFactory.forMode(provider.apiMode).stream(endpoint, attemptRequest).collect { event ->
                     when (event) {
                         is StreamEvent.TextDelta -> {
                             partial.append(event.text)
@@ -125,8 +140,8 @@ class RotationEngine(
                         is StreamEvent.Completed -> usage = event.usage
                     }
                 }
-                markSuccess(provider, System.currentTimeMillis() - startedAt)
-                emit(RotationEvent.Finished(provider, model, usage))
+                markSuccess(endpoint, System.currentTimeMillis() - startedAt)
+                emit(RotationEvent.Finished(endpoint, model, usage))
                 return@flow
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -136,10 +151,15 @@ class RotationEngine(
                     kind = LlmException.Kind.NETWORK,
                     cause = t,
                 )
-                Log.w(TAG, "${provider.name} failed: ${error.message}")
-                markFailure(provider, error.message ?: error.shortLabel, config)
-                lastError = "${provider.name}: ${error.shortLabel}"
-                lastProvider = provider
+                Log.w(TAG, "${provider.name} ${endpoint.keyLabel ?: ""} failed: ${error.message}")
+                markFailure(endpoint, error.message ?: error.shortLabel, config)
+                lastEndpoint = endpoint
+                lastError = buildString {
+                    append(provider.name)
+                    endpoint.keyLabel?.let { append(" ($it)") }
+                    append(": ")
+                    append(error.shortLabel)
+                }
 
                 if (!shouldRotate(error, config)) {
                     emit(RotationEvent.Failed("${provider.name} — ${error.message}", attempt))
@@ -149,13 +169,28 @@ class RotationEngine(
                     emit(RotationEvent.Failed("${provider.name} — ${error.message} (mid-stream handoff off)", attempt))
                     return@flow
                 }
+
+                if (error.kind.isCredentialFailure) {
+                    // Walk the whole pool before saying anything; this is not a transport problem.
+                    credentialFailures++
+                } else if (++budgetSpent >= config.maxAttempts) {
+                    break
+                }
             }
         }
 
         emit(
             RotationEvent.Failed(
-                lastError?.let { "All $attempt attempt(s) failed. Last: $it" }
-                    ?: "No provider could serve this request.",
+                buildString {
+                    if (credentialFailures > 0 && credentialFailures == attempt) {
+                        append("All $attempt key(s) in the pool were rejected. Last: ")
+                        append(lastError.orEmpty())
+                    } else if (lastError != null) {
+                        append("All $attempt attempt(s) failed. Last: $lastError")
+                    } else {
+                        append("No provider could serve this request.")
+                    }
+                },
                 attempt,
             )
         )
@@ -163,19 +198,25 @@ class RotationEngine(
 
     // --- Selection ------------------------------------------------------------------------
 
+    /**
+     * Picks the next endpoint. Strategy applies at the provider level; within a provider the keys
+     * are always walked in order, so a pool behaves predictably.
+     */
     private fun pick(
-        pool: List<Provider>,
+        pool: List<Endpoint>,
         tried: Set<String>,
         pinnedProviderId: String?,
-        attempt: Int,
         config: RotationSettings,
-    ): Provider? {
-        if (attempt == 0 && pinnedProviderId != null) {
-            pool.firstOrNull { it.id == pinnedProviderId }?.let { return it }
-        }
-
+    ): Endpoint? {
         val remaining = pool.filterNot { it.id in tried }
         if (remaining.isEmpty()) return null
+
+        if (pinnedProviderId != null) {
+            // Exhaust the pinned provider's keys before falling through to the rest of the pool.
+            remaining.filter { it.provider.id == pinnedProviderId }
+                .minByOrNull { it.keyIndex }
+                ?.let { return it }
+        }
 
         val now = System.currentTimeMillis()
         val healthy = remaining.filterNot { healthOf(it.id).isCoolingDown(now) }
@@ -184,29 +225,41 @@ class RotationEngine(
             remaining.sortedBy { healthOf(it.id).cooldownUntil }.take(1)
         }
 
-        return when (config.strategy) {
-            RotationStrategy.FAILOVER -> candidates.first()
+        val byProvider = candidates.groupBy { it.provider.id }
+        val providersInPlay = candidates.map { it.provider }.distinctBy { it.id }
+
+        val chosenProvider = when (config.strategy) {
+            RotationStrategy.FAILOVER -> providersInPlay.first()
 
             RotationStrategy.ROUND_ROBIN ->
-                candidates[(roundRobinCursor.getAndIncrement().mod(candidates.size))]
+                providersInPlay[roundRobinCursor.getAndIncrement().mod(providersInPlay.size)]
 
-            RotationStrategy.LEAST_USED -> candidates.minByOrNull { healthOf(it.id).lastUsedAt }
+            RotationStrategy.LEAST_USED -> providersInPlay.minByOrNull { provider ->
+                byProvider.getValue(provider.id).minOf { healthOf(it.id).lastUsedAt }
+            } ?: providersInPlay.first()
 
             RotationStrategy.WEIGHTED -> {
-                val total = candidates.sumOf { it.weight.coerceAtLeast(1) }
+                val total = providersInPlay.sumOf { it.weight.coerceAtLeast(1) }
                 var roll = Random.nextInt(total)
-                candidates.firstOrNull { provider ->
+                providersInPlay.firstOrNull { provider ->
                     roll -= provider.weight.coerceAtLeast(1)
                     roll < 0
-                } ?: candidates.first()
+                } ?: providersInPlay.first()
             }
         }
+
+        return byProvider.getValue(chosenProvider.id).minByOrNull { it.keyIndex }
     }
 
     private fun shouldRotate(error: LlmException, config: RotationSettings): Boolean = when (error.kind) {
-        LlmException.Kind.RATE_LIMIT -> config.rotateOnRateLimit
-        LlmException.Kind.SERVER, LlmException.Kind.NETWORK, LlmException.Kind.PARSE -> config.rotateOnServerError
-        LlmException.Kind.AUTH -> config.rotateOnAuthError
+        LlmException.Kind.AUTH,
+        LlmException.Kind.QUOTA,
+        LlmException.Kind.RATE_LIMIT -> config.rotateOnKeyError
+
+        LlmException.Kind.SERVER,
+        LlmException.Kind.NETWORK,
+        LlmException.Kind.PARSE -> config.rotateOnServerError
+
         LlmException.Kind.MODEL_MISSING -> config.rotateOnModelMissing
         // A malformed request will fail identically everywhere; surface it instead of burning keys.
         LlmException.Kind.BAD_REQUEST -> false
@@ -215,7 +268,7 @@ class RotationEngine(
 
     // --- Health ---------------------------------------------------------------------------
 
-    private fun markSuccess(provider: Provider, latencyMs: Long) = mutate(provider.id) { health ->
+    private fun markSuccess(endpoint: Endpoint, latencyMs: Long) = mutate(endpoint.id) { health ->
         health.copy(
             successes = health.successes + 1,
             consecutiveFailures = 0,
@@ -226,8 +279,8 @@ class RotationEngine(
         )
     }
 
-    private fun markFailure(provider: Provider, reason: String, config: RotationSettings) =
-        mutate(provider.id) { health ->
+    private fun markFailure(endpoint: Endpoint, reason: String, config: RotationSettings) =
+        mutate(endpoint.id) { health ->
             val consecutive = health.consecutiveFailures + 1
             val backoff = min(
                 config.cooldownSeconds.toLong() shl (consecutive - 1).coerceAtMost(5),
@@ -242,9 +295,9 @@ class RotationEngine(
             )
         }
 
-    private fun mutate(providerId: String, transform: (EndpointHealth) -> EndpointHealth) {
+    private fun mutate(endpointId: String, transform: (EndpointHealth) -> EndpointHealth) {
         _health.value = _health.value.toMutableMap().apply {
-            put(providerId, transform(this[providerId] ?: EndpointHealth(providerId)))
+            put(endpointId, transform(this[endpointId] ?: EndpointHealth(endpointId)))
         }
     }
 

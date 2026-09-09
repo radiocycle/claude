@@ -2,7 +2,7 @@ package dev.radiocycle.llmhub.net
 
 import dev.radiocycle.llmhub.core.AppJson
 import dev.radiocycle.llmhub.data.model.ChatMessage
-import dev.radiocycle.llmhub.data.model.Provider
+import dev.radiocycle.llmhub.data.model.Endpoint
 import dev.radiocycle.llmhub.data.model.Role
 import dev.radiocycle.llmhub.data.model.TokenUsage
 import dev.radiocycle.llmhub.data.model.ToolCall
@@ -33,7 +33,8 @@ import kotlin.coroutines.coroutineContext
 /** Chat Completions dialect — also covers OpenRouter, Groq, DeepSeek, Ollama and friends. */
 class OpenAiClient : LlmClient {
 
-    override fun stream(provider: Provider, request: ChatRequest): Flow<StreamEvent> = flow {
+    override fun stream(endpoint: Endpoint, request: ChatRequest): Flow<StreamEvent> = flow {
+        val provider = endpoint.provider
         val url = "${provider.baseUrl.trimBaseUrl()}/chat/completions"
         val payload = buildPayload(request, stream = true)
         val http = Http.withTimeout(provider.timeoutSeconds)
@@ -43,7 +44,7 @@ class OpenAiClient : LlmClient {
                 .post(payload.toString().toRequestBody(JSON_MEDIA))
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
-                .apply { if (provider.apiKey.isNotBlank()) header("Authorization", "Bearer ${provider.apiKey}") }
+                .apply { if (endpoint.apiKey.isNotBlank()) header("Authorization", "Bearer ${endpoint.apiKey}") }
                 .applyCustomHeaders(provider.headers)
                 .build()
         )
@@ -114,10 +115,11 @@ class OpenAiClient : LlmClient {
         }
     }.flowOn(Dispatchers.IO)
 
-    override suspend fun listModels(provider: Provider): List<String> = withContext(Dispatchers.IO) {
+    override suspend fun listModels(endpoint: Endpoint): List<String> = withContext(Dispatchers.IO) {
+        val provider = endpoint.provider
         val request = Request.Builder()
             .url("${provider.baseUrl.trimBaseUrl()}/models")
-            .apply { if (provider.apiKey.isNotBlank()) header("Authorization", "Bearer ${provider.apiKey}") }
+            .apply { if (endpoint.apiKey.isNotBlank()) header("Authorization", "Bearer ${endpoint.apiKey}") }
             .applyCustomHeaders(provider.headers)
             .build()
         try {

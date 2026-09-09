@@ -1,7 +1,7 @@
 package dev.radiocycle.llmhub.net
 
 import dev.radiocycle.llmhub.data.model.ChatMessage
-import dev.radiocycle.llmhub.data.model.Provider
+import dev.radiocycle.llmhub.data.model.Endpoint
 import dev.radiocycle.llmhub.data.model.TokenUsage
 import dev.radiocycle.llmhub.data.model.ToolCall
 import dev.radiocycle.llmhub.tools.ToolSpec
@@ -39,7 +39,18 @@ class LlmException(
     cause: Throwable? = null,
 ) : Exception(message, cause) {
 
-    enum class Kind { AUTH, RATE_LIMIT, SERVER, NETWORK, MODEL_MISSING, BAD_REQUEST, PARSE, CANCELLED }
+    enum class Kind {
+        /** 401 / 403 — the credential is rejected. */
+        AUTH,
+        /** 402 — the credential is out of funds or over its quota. */
+        QUOTA,
+        /** 429 — the credential is rate limited. */
+        RATE_LIMIT,
+        SERVER, NETWORK, MODEL_MISSING, BAD_REQUEST, PARSE, CANCELLED;
+
+        /** True when the failure is a property of the credential, not of the request. */
+        val isCredentialFailure: Boolean get() = this == AUTH || this == QUOTA || this == RATE_LIMIT
+    }
 
     val shortLabel: String
         get() = buildString {
@@ -49,9 +60,9 @@ class LlmException(
 }
 
 interface LlmClient {
-    /** Streams one assistant turn. Must throw [LlmException] on any failure. */
-    fun stream(provider: Provider, request: ChatRequest): Flow<StreamEvent>
+    /** Streams one assistant turn through one provider+key pair. Throws [LlmException] on failure. */
+    fun stream(endpoint: Endpoint, request: ChatRequest): Flow<StreamEvent>
 
     /** Queries the provider's model catalogue. Returns an empty list if unsupported. */
-    suspend fun listModels(provider: Provider): List<String>
+    suspend fun listModels(endpoint: Endpoint): List<String>
 }

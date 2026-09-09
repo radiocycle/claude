@@ -13,8 +13,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 /**
- * Drives one user turn to completion: stream an answer through the [RotationEngine], run any tools
- * the model asked for, feed the results back, and repeat until the model stops calling tools.
+ * Drives one user turn to completion, one round at a time:
+ *
+ *     generate -> tool calls -> tool output -> generate -> ...
+ *
+ * Each round streams an assistant turn through the [RotationEngine]. If that turn ended in tool
+ * calls, they are executed, their output is appended as a TOOL message, and the loop generates
+ * again with that output in context. The loop always ends on a generation: once the tool budget is
+ * spent no further tools are offered, so the model has to answer in prose.
  */
 class ChatEngine(
     private val settings: SettingsRepository,
@@ -31,9 +37,10 @@ class ChatEngine(
         pinnedModel: String?,
     ): Flow<List<ChatMessage>> = flow {
         val appSettings = settings.current
-        val toolSpecs = tools.activeSpecs()
         val produced = mutableListOf<ChatMessage>()
-        var iteration = 0
+        // Emptied once the tool budget is spent, which forces the closing turn to be prose.
+        var offeredTools = tools.activeSpecs()
+        var round = 0
 
         while (true) {
             var assistant = ChatMessage(role = Role.ASSISTANT)
@@ -46,7 +53,7 @@ class ChatEngine(
                 model = pinnedModel.orEmpty(),
                 messages = history + produced,
                 system = appSettings.systemPrompt.takeIf { it.isNotBlank() },
-                tools = toolSpecs,
+                tools = offeredTools,
                 temperature = appSettings.temperature,
                 maxTokens = appSettings.maxTokens,
             )
@@ -54,7 +61,10 @@ class ChatEngine(
             rotation.stream(request, pinnedProviderId).collect { event ->
                 when (event) {
                     is RotationEvent.Started -> {
-                        assistant = assistant.copy(providerName = event.provider.name, model = event.model)
+                        assistant = assistant.copy(
+                            providerName = event.endpoint.provider.name,
+                            model = event.model,
+                        )
                     }
 
                     is RotationEvent.Text -> {
@@ -82,7 +92,7 @@ class ChatEngine(
 
                     is RotationEvent.Finished -> {
                         assistant = assistant.copy(
-                            providerName = event.provider.name,
+                            providerName = event.endpoint.provider.name,
                             model = event.model,
                         )
                     }
@@ -101,9 +111,7 @@ class ChatEngine(
 
             if (failed || pendingCalls.isEmpty()) break
 
-            iteration++
-            val budgetSpent = iteration >= appSettings.tools.maxToolIterations
-
+            round++
             var toolMessage = ChatMessage(
                 role = Role.TOOL,
                 toolResults = pendingCalls.map { call ->
@@ -120,16 +128,9 @@ class ChatEngine(
             produced[produced.lastIndex] = toolMessage
             emit(produced.toList())
 
-            if (budgetSpent) {
-                produced += ChatMessage(
-                    role = Role.ASSISTANT,
-                    content = "",
-                    error = "Tool-call budget reached (${appSettings.tools.maxToolIterations} rounds). " +
-                        "Send another message to continue.",
-                )
-                emit(produced.toList())
-                break
-            }
+            // Budget spent: loop once more with no tools on offer, so the results just gathered are
+            // turned into a written answer rather than another round of calls.
+            if (round >= appSettings.tools.maxToolIterations) offeredTools = emptyList()
         }
     }
 }

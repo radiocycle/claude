@@ -36,6 +36,7 @@ data class Provider(
     val apiMode: ApiMode = ApiMode.OPENAI,
     /** Base URL without the endpoint path, e.g. `https://api.openai.com/v1`. */
     val baseUrl: String = "",
+    /** One or more API keys, separated by commas, semicolons or newlines. Rotated in order. */
     val apiKey: String = "",
     val headers: List<HeaderEntry> = emptyList(),
     val models: List<String> = emptyList(),
@@ -50,8 +51,19 @@ data class Provider(
     val presetId: String? = null,
     val notes: String = "",
 ) {
-    val isConfigured: Boolean
-        get() = baseUrl.isNotBlank() && (apiKey.isNotBlank() || presetId == PRESET_LOCAL || apiMode == ApiMode.OPENAI && baseUrl.contains("localhost"))
+    /** The key pool, in rotation order. Empty for endpoints that need no credential. */
+    val keys: List<String>
+        get() = apiKey.split(',', ';', '\n')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+    /**
+     * How many distinct credentials this provider can be tried with. A provider with no key still
+     * has one slot, so keyless local endpoints stay reachable.
+     */
+    val keySlotCount: Int get() = keys.size.coerceAtLeast(1)
+
+    fun keyAt(index: Int): String = keys.getOrElse(index) { "" }
 
     fun modelOrDefault(requested: String?): String =
         requested?.takeIf { it.isNotBlank() && (models.isEmpty() || it in models) }
@@ -89,9 +101,9 @@ enum class RotationStrategy {
         }
 }
 
-/** Runtime health of one endpoint. Not persisted — it is rebuilt every launch. */
+/** Runtime health of one provider+key pair. Not persisted — it is rebuilt every launch. */
 data class EndpointHealth(
-    val providerId: String,
+    val endpointId: String,
     val successes: Int = 0,
     val failures: Int = 0,
     val consecutiveFailures: Int = 0,
@@ -101,4 +113,30 @@ data class EndpointHealth(
     val lastError: String? = null,
 ) {
     fun isCoolingDown(now: Long = System.currentTimeMillis()) = now < cooldownUntil
+}
+
+/**
+ * One provider paired with one of its API keys — the actual unit the rotation engine schedules,
+ * tracks health for, and hands to a client.
+ */
+data class Endpoint(
+    val provider: Provider,
+    val keyIndex: Int,
+) {
+    val apiKey: String get() = provider.keyAt(keyIndex)
+
+    /** Stable identity for health tracking. */
+    val id: String get() = "${provider.id}#$keyIndex"
+
+    /** `null` when the provider has a single credential, otherwise a 1-based label for the UI. */
+    val keyLabel: String? get() = if (provider.keySlotCount > 1) "key ${keyIndex + 1}" else null
+
+    val maskedKey: String
+        get() = apiKey.let { key ->
+            when {
+                key.isEmpty() -> "(no key)"
+                key.length <= 10 -> "…" + key.takeLast(4)
+                else -> key.take(4) + "…" + key.takeLast(4)
+            }
+        }
 }

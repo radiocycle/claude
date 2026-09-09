@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.radiocycle.llmhub.data.model.BuiltInPresets
+import dev.radiocycle.llmhub.data.model.Endpoint
 import dev.radiocycle.llmhub.data.model.EndpointHealth
 import dev.radiocycle.llmhub.data.model.Provider
 
@@ -115,7 +116,8 @@ fun ProvidersScreen(viewModel: ProvidersViewModel, onEdit: () -> Unit) {
                 items(providers.sortedBy { it.priority }, key = { it.id }) { provider ->
                     ProviderCard(
                         provider = provider,
-                        health = health[provider.id],
+                        health = (0 until provider.keySlotCount)
+                            .map { slot -> health[Endpoint(provider, slot).id] },
                         onToggle = { viewModel.setEnabled(provider.id, it) },
                         onEdit = {
                             viewModel.startEdit(provider.id)
@@ -189,7 +191,7 @@ fun ProvidersScreen(viewModel: ProvidersViewModel, onEdit: () -> Unit) {
 @Composable
 private fun ProviderCard(
     provider: Provider,
-    health: EndpointHealth?,
+    health: List<EndpointHealth?>,
     onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -247,12 +249,18 @@ private fun ProviderCard(
 }
 
 @Composable
-private fun HealthRow(provider: Provider, health: EndpointHealth?) {
-    val cooling = health?.isCoolingDown() == true
+private fun HealthRow(provider: Provider, health: List<EndpointHealth?>) {
+    val slots = health.filterNotNull()
+    val coolingCount = slots.count { it.isCoolingDown() }
+    val allCooling = slots.isNotEmpty() && coolingCount == provider.keySlotCount
+    val successes = slots.sumOf { it.successes }
+    val failures = slots.sumOf { it.failures }
+    val lastLatency = slots.maxOfOrNull { it.lastLatencyMs } ?: 0L
     val statusColor = when {
         !provider.enabled -> MaterialTheme.colorScheme.outline
-        cooling -> MaterialTheme.colorScheme.error
-        health != null && health.successes > 0 -> MaterialTheme.colorScheme.tertiary
+        allCooling -> MaterialTheme.colorScheme.error
+        coolingCount > 0 -> MaterialTheme.colorScheme.secondary
+        successes > 0 -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.outline
     }
     Row(
@@ -268,16 +276,18 @@ private fun HealthRow(provider: Provider, health: EndpointHealth?) {
             text = buildString {
                 when {
                     !provider.enabled -> append("disabled")
-                    cooling -> {
-                        val seconds = ((health!!.cooldownUntil - System.currentTimeMillis()) / 1000)
-                            .coerceAtLeast(0)
-                        append("cooling down ${seconds}s")
+                    allCooling -> {
+                        val soonest = slots.minOf { it.cooldownUntil }
+                        val seconds = ((soonest - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
+                        append("all keys cooling down ${seconds}s")
                     }
+                    coolingCount > 0 -> append("ready · $coolingCount of ${provider.keySlotCount} keys cooling")
                     else -> append("ready")
                 }
-                if (health != null && (health.successes > 0 || health.failures > 0)) {
-                    append(" · ${health.successes} ok / ${health.failures} fail")
-                    if (health.lastLatencyMs > 0) append(" · ${health.lastLatencyMs} ms")
+                provider.keys.size.takeIf { it > 1 }?.let { append(" · $it keys") }
+                if (successes > 0 || failures > 0) {
+                    append(" · $successes ok / $failures fail")
+                    if (lastLatency > 0) append(" · $lastLatency ms")
                 }
                 provider.models.size.takeIf { it > 0 }?.let { append(" · $it models") }
             },
@@ -286,7 +296,7 @@ private fun HealthRow(provider: Provider, health: EndpointHealth?) {
             maxLines = 2,
         )
     }
-    health?.lastError?.takeIf { provider.enabled && cooling }?.let { error ->
+    slots.lastOrNull { it.lastError != null }?.lastError?.takeIf { provider.enabled && allCooling }?.let { error ->
         Text(
             text = error,
             style = MaterialTheme.typography.labelSmall,

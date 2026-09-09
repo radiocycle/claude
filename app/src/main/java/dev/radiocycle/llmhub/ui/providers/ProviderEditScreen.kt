@@ -128,19 +128,31 @@ fun ProviderEditScreen(viewModel: ProvidersViewModel, onClose: () -> Unit) {
             OutlinedTextField(
                 value = provider.apiKey,
                 onValueChange = { key -> viewModel.editDraft { it.copy(apiKey = key) } },
-                label = { Text("API key") },
-                singleLine = true,
+                label = { Text("API keys") },
+                placeholder = { Text("key1, key2, key3") },
+                singleLine = false,
+                minLines = 2,
                 visualTransformation = if (keyVisible) VisualTransformation.None
                 else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = { keyVisible = !keyVisible }) {
                         Icon(
                             if (keyVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                            contentDescription = if (keyVisible) "Hide key" else "Show key",
+                            contentDescription = if (keyVisible) "Hide keys" else "Show keys",
                         )
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = when (val count = provider.keys.size) {
+                    0 -> "No key — fine for local endpoints that do not authenticate."
+                    1 -> "1 key."
+                    else -> "$count keys. On 401, 402, 403 or 429 the next one is tried silently; " +
+                        "nothing is reported until the whole pool is spent."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             SectionLabel("Custom headers")

@@ -1,7 +1,7 @@
 package dev.radiocycle.llmhub.net
 
 import dev.radiocycle.llmhub.core.AppJson
-import dev.radiocycle.llmhub.data.model.Provider
+import dev.radiocycle.llmhub.data.model.Endpoint
 import dev.radiocycle.llmhub.data.model.Role
 import dev.radiocycle.llmhub.data.model.TokenUsage
 import dev.radiocycle.llmhub.data.model.ToolCall
@@ -33,7 +33,8 @@ import kotlin.coroutines.coroutineContext
 /** Google Generative Language (Gemini) dialect. */
 class GoogleClient : LlmClient {
 
-    override fun stream(provider: Provider, request: ChatRequest): Flow<StreamEvent> = flow {
+    override fun stream(endpoint: Endpoint, request: ChatRequest): Flow<StreamEvent> = flow {
+        val provider = endpoint.provider
         val model = request.model.removePrefix("models/")
         val url = "${provider.baseUrl.trimBaseUrl()}/v1beta/models/$model:streamGenerateContent?alt=sse"
         val payload = buildPayload(request)
@@ -43,7 +44,7 @@ class GoogleClient : LlmClient {
                 .post(payload.toString().toRequestBody(OpenAiClient.JSON_MEDIA))
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
-                .apply { if (provider.apiKey.isNotBlank()) header("x-goog-api-key", provider.apiKey) }
+                .apply { if (endpoint.apiKey.isNotBlank()) header("x-goog-api-key", endpoint.apiKey) }
                 .applyCustomHeaders(provider.headers)
                 .build()
         )
@@ -117,10 +118,11 @@ class GoogleClient : LlmClient {
         }
     }.flowOn(Dispatchers.IO)
 
-    override suspend fun listModels(provider: Provider): List<String> = withContext(Dispatchers.IO) {
+    override suspend fun listModels(endpoint: Endpoint): List<String> = withContext(Dispatchers.IO) {
+        val provider = endpoint.provider
         val request = Request.Builder()
             .url("${provider.baseUrl.trimBaseUrl()}/v1beta/models?pageSize=200")
-            .apply { if (provider.apiKey.isNotBlank()) header("x-goog-api-key", provider.apiKey) }
+            .apply { if (endpoint.apiKey.isNotBlank()) header("x-goog-api-key", endpoint.apiKey) }
             .applyCustomHeaders(provider.headers)
             .build()
         try {

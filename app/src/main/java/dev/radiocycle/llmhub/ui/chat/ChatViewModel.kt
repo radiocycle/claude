@@ -3,6 +3,7 @@ package dev.radiocycle.llmhub.ui.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.radiocycle.llmhub.AppContainer
+import dev.radiocycle.llmhub.data.model.AppSettings
 import dev.radiocycle.llmhub.data.model.ChatMessage
 import dev.radiocycle.llmhub.data.model.Conversation
 import dev.radiocycle.llmhub.data.model.Provider
@@ -30,6 +31,7 @@ class ChatViewModel(private val container: AppContainer) : ViewModel() {
 
     val conversations: StateFlow<List<Conversation>> = container.conversations.conversations
     val providers: StateFlow<List<Provider>> = container.providers.providers
+    val settings: StateFlow<AppSettings> = container.settings.settings
 
     private var streamJob: Job? = null
 

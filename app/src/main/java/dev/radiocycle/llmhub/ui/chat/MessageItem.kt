@@ -46,13 +46,23 @@ import dev.radiocycle.llmhub.data.model.ChatMessage
 import dev.radiocycle.llmhub.data.model.Role
 import dev.radiocycle.llmhub.data.model.ToolResult
 import dev.radiocycle.llmhub.ui.common.MarkdownText
+import dev.radiocycle.llmhub.ui.common.RichMarkdown
 
 @Composable
-fun MessageItem(message: ChatMessage, isLast: Boolean, isStreaming: Boolean) {
+fun MessageItem(
+    message: ChatMessage,
+    isLast: Boolean,
+    isStreaming: Boolean,
+    richRendering: Boolean,
+) {
     when (message.role) {
         Role.USER -> UserMessage(message)
         Role.TOOL -> ToolMessage(message)
-        Role.ASSISTANT -> AssistantMessage(message, showCursor = isLast && isStreaming)
+        Role.ASSISTANT -> AssistantMessage(
+            message = message,
+            showCursor = isLast && isStreaming,
+            richRendering = richRendering,
+        )
         Role.SYSTEM -> Unit
     }
 }
@@ -76,7 +86,7 @@ private fun UserMessage(message: ChatMessage) {
 }
 
 @Composable
-private fun AssistantMessage(message: ChatMessage, showCursor: Boolean) {
+private fun AssistantMessage(message: ChatMessage, showCursor: Boolean, richRendering: Boolean) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (message.providerName != null) {
             ProviderBadge(message.providerName, message.model)
@@ -94,10 +104,12 @@ private fun AssistantMessage(message: ChatMessage, showCursor: Boolean) {
         }
 
         if (message.content.isNotBlank()) {
-            MarkdownText(
-                text = if (showCursor) message.content + "▍" else message.content,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            val body = if (showCursor) message.content + "▍" else message.content
+            if (richRendering) {
+                RichMarkdown(body, Modifier.fillMaxWidth())
+            } else {
+                MarkdownText(body, Modifier.fillMaxWidth())
+            }
         } else if (showCursor && message.error == null) {
             Text("▍", style = MaterialTheme.typography.bodyLarge)
         }

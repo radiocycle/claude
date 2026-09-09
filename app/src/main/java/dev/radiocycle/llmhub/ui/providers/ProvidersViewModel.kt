@@ -3,6 +3,7 @@ package dev.radiocycle.llmhub.ui.providers
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.radiocycle.llmhub.AppContainer
+import dev.radiocycle.llmhub.data.model.Endpoint
 import dev.radiocycle.llmhub.data.model.EndpointHealth
 import dev.radiocycle.llmhub.data.model.Provider
 import dev.radiocycle.llmhub.data.model.ProviderPreset
@@ -81,7 +82,8 @@ class ProvidersViewModel(private val container: AppContainer) : ViewModel() {
         }
         _probe.value = ProbeState(running = true)
         viewModelScope.launch {
-            runCatching { ClientFactory.forMode(provider.apiMode).listModels(provider) }.fold(
+            val endpoint = Endpoint(provider, 0)
+            runCatching { ClientFactory.forMode(provider.apiMode).listModels(endpoint) }.fold(
                 onSuccess = { models ->
                     if (models.isEmpty()) {
                         _probe.value = ProbeState(message = "Connected, but no models were returned", isError = false)

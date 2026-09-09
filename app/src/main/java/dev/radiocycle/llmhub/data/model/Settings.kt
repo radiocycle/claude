@@ -43,12 +43,13 @@ data class RotationSettings(
      * provider as a prefill and continue instead of restarting the answer.
      */
     val midStreamHandoff: Boolean = true,
-    /** Retry on rate limits (429) rather than surfacing them. */
-    val rotateOnRateLimit: Boolean = true,
+    /**
+     * Credential failures — 401, 402, 403 and 429 — walk the whole key pool silently and only
+     * surface once every key of every provider has been tried.
+     */
+    val rotateOnKeyError: Boolean = true,
     /** Retry on 5xx / network errors. */
     val rotateOnServerError: Boolean = true,
-    /** Retry on 401/403 (a dead key should not block the turn). */
-    val rotateOnAuthError: Boolean = true,
     /** Also rotate when the model itself is missing on that endpoint (404 model_not_found). */
     val rotateOnModelMissing: Boolean = true,
 )
@@ -75,6 +76,8 @@ data class AppSettings(
     val streamResponses: Boolean = true,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
+    /** Render replies with the full Markdown + LaTeX engine instead of the lightweight one. */
+    val richRendering: Boolean = true,
     val rotation: RotationSettings = RotationSettings(),
     val tools: ToolSettings = ToolSettings(),
 )

@@ -73,6 +73,7 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
     val providers by viewModel.providers.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -164,7 +165,7 @@ fun ChatScreen(
                         onOpenProviders = onOpenProviders,
                     )
                 } else {
-                    MessageList(state)
+                    MessageList(state, richRendering = settings.richRendering)
                 }
 
                 state.notice?.let { notice ->
@@ -225,7 +226,7 @@ private fun ActiveRouteLabel(state: ChatUiState, providers: List<Provider>) {
 }
 
 @Composable
-private fun MessageList(state: ChatUiState) {
+private fun MessageList(state: ChatUiState, richRendering: Boolean) {
     val listState = rememberLazyListState()
 
     LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.content?.length) {
@@ -243,6 +244,7 @@ private fun MessageList(state: ChatUiState) {
                 message = message,
                 isLast = message.id == state.messages.lastOrNull()?.id,
                 isStreaming = state.isStreaming,
+                richRendering = richRendering,
             )
         }
         if (state.isStreaming) {

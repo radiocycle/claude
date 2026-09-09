@@ -1,11 +1,13 @@
 package dev.radiocycle.llmhub.ui.common
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,6 +22,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -34,6 +38,7 @@ import androidx.compose.ui.unit.sp
 private sealed interface Block {
     data class Paragraph(val lines: List<String>) : Block
     data class Code(val language: String, val code: String) : Block
+    data class Table(val header: List<String>, val rows: List<List<String>>) : Block
 }
 
 /**
@@ -52,6 +57,7 @@ fun MarkdownText(
             when (block) {
                 is Block.Paragraph -> ParagraphBlock(block.lines, color)
                 is Block.Code -> CodeBlock(block)
+                is Block.Table -> TableBlock(block)
             }
         }
     }
@@ -108,12 +114,68 @@ private fun CodeBlock(block: Block.Code) {
     }
 }
 
+private val TABLE_DIVIDER = Regex("""^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$""")
+
+private fun splitRow(line: String): List<String> = line
+    .trim()
+    .removePrefix("|")
+    .removeSuffix("|")
+    .split('|')
+    .map { it.trim() }
+
+@Composable
+private fun TableBlock(block: Block.Table) {
+    val outline = MaterialTheme.colorScheme.outlineVariant
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.horizontalScroll(rememberScrollState())) {
+            TableRow(block.header, header = true, outline = outline)
+            block.rows.forEach { row -> TableRow(row, header = false, outline = outline) }
+        }
+    }
+}
+
+@Composable
+private fun TableRow(cells: List<String>, header: Boolean, outline: androidx.compose.ui.graphics.Color) {
+    Row(
+        Modifier
+            .background(
+                if (header) MaterialTheme.colorScheme.surfaceContainerHigh
+                else androidx.compose.ui.graphics.Color.Transparent
+            )
+            .drawBehind {
+                drawLine(
+                    color = outline,
+                    start = Offset(0f, size.height),
+                    end = Offset(size.width, size.height),
+                    strokeWidth = 1f,
+                )
+            }
+    ) {
+        cells.forEach { cell ->
+            Text(
+                text = renderLines(listOf(cell)),
+                style = if (header) MaterialTheme.typography.labelLarge
+                else MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .widthIn(min = 92.dp, max = 260.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+    }
+}
+
 private fun parseBlocks(text: String): List<Block> {
     val blocks = mutableListOf<Block>()
     val paragraph = mutableListOf<String>()
     var inCode = false
     var language = ""
     val code = StringBuilder()
+    val lines = text.lines()
+    var index = 0
 
     fun flushParagraph() {
         if (paragraph.isNotEmpty()) {
@@ -122,7 +184,8 @@ private fun parseBlocks(text: String): List<Block> {
         }
     }
 
-    text.lines().forEach { line ->
+    while (index < lines.size) {
+        val line = lines[index]
         val fence = line.trimStart().startsWith("```")
         when {
             fence && !inCode -> {
@@ -131,13 +194,34 @@ private fun parseBlocks(text: String): List<Block> {
                 language = line.trimStart().removePrefix("```").trim()
                 code.setLength(0)
             }
+
             fence && inCode -> {
                 inCode = false
                 blocks += Block.Code(language, code.toString().trimEnd())
             }
+
             inCode -> code.appendLine(line)
+
+            // A GFM pipe table: a header row followed by a --- divider.
+            line.contains('|') && lines.getOrNull(index + 1)?.matches(TABLE_DIVIDER) == true -> {
+                flushParagraph()
+                val header = splitRow(line)
+                val rows = mutableListOf<List<String>>()
+                index += 2
+                while (index < lines.size && lines[index].contains('|') && lines[index].isNotBlank()) {
+                    rows += splitRow(lines[index]).let { cells ->
+                        // Pad or trim so every row lines up with the header.
+                        List(header.size) { cells.getOrElse(it) { "" } }
+                    }
+                    index++
+                }
+                blocks += Block.Table(header, rows)
+                continue
+            }
+
             else -> paragraph += line
         }
+        index++
     }
     if (inCode) blocks += Block.Code(language, code.toString().trimEnd())
     flushParagraph()

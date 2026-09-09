@@ -55,6 +55,7 @@ fun httpFailure(response: Response, bodyText: String?): LlmException {
     val detail = bodyText?.take(400)?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
     val kind = when {
         code == 401 || code == 403 -> LlmException.Kind.AUTH
+        code == 402 -> LlmException.Kind.QUOTA
         code == 429 -> LlmException.Kind.RATE_LIMIT
         code == 404 && detail.contains("model", ignoreCase = true) -> LlmException.Kind.MODEL_MISSING
         code == 400 && detail.contains("model", ignoreCase = true) -> LlmException.Kind.MODEL_MISSING

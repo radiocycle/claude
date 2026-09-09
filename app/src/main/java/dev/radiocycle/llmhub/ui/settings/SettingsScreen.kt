@@ -114,6 +114,12 @@ fun SettingsScreen(repository: SettingsRepository) {
                 }
             }
 
+            Text(
+                "Attempts below cap transport retries only; credential failures always walk the " +
+                    "whole pool.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             SliderRow(
                 label = "Max attempts per turn",
                 value = settings.rotation.maxAttempts.toFloat(),
@@ -150,11 +156,12 @@ fun SettingsScreen(repository: SettingsRepository) {
                 },
             )
             ToggleRow(
-                title = "Rotate on rate limits",
-                subtitle = "HTTP 429",
-                checked = settings.rotation.rotateOnRateLimit,
+                title = "Rotate keys on 401 / 402 / 403 / 429",
+                subtitle = "Walk the whole key pool silently — nothing is reported until the last " +
+                    "key of the last provider has been tried",
+                checked = settings.rotation.rotateOnKeyError,
                 onChange = { enabled ->
-                    repository.update { it.copy(rotation = it.rotation.copy(rotateOnRateLimit = enabled)) }
+                    repository.update { it.copy(rotation = it.rotation.copy(rotateOnKeyError = enabled)) }
                 },
             )
             ToggleRow(
@@ -163,14 +170,6 @@ fun SettingsScreen(repository: SettingsRepository) {
                 checked = settings.rotation.rotateOnServerError,
                 onChange = { enabled ->
                     repository.update { it.copy(rotation = it.rotation.copy(rotateOnServerError = enabled)) }
-                },
-            )
-            ToggleRow(
-                title = "Rotate on auth errors",
-                subtitle = "HTTP 401/403 — a dead key skips to the next provider",
-                checked = settings.rotation.rotateOnAuthError,
-                onChange = { enabled ->
-                    repository.update { it.copy(rotation = it.rotation.copy(rotateOnAuthError = enabled)) }
                 },
             )
             ToggleRow(
@@ -281,6 +280,13 @@ fun SettingsScreen(repository: SettingsRepository) {
                     )
                 }
             }
+            ToggleRow(
+                title = "Markdown + LaTeX rendering",
+                subtitle = "Tables, fenced code and TeX formulas typeset with KaTeX. Turn off for " +
+                    "the lightweight renderer.",
+                checked = settings.richRendering,
+                onChange = { enabled -> repository.update { it.copy(richRendering = enabled) } },
+            )
             ToggleRow(
                 title = "Dynamic color",
                 subtitle = "Derive the palette from the wallpaper (Android 12+)",

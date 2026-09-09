@@ -2,7 +2,7 @@ package dev.radiocycle.llmhub.net
 
 import dev.radiocycle.llmhub.core.AppJson
 import dev.radiocycle.llmhub.data.model.ChatMessage
-import dev.radiocycle.llmhub.data.model.Provider
+import dev.radiocycle.llmhub.data.model.Endpoint
 import dev.radiocycle.llmhub.data.model.Role
 import dev.radiocycle.llmhub.data.model.TokenUsage
 import dev.radiocycle.llmhub.data.model.ToolCall
@@ -32,7 +32,8 @@ import kotlin.coroutines.coroutineContext
 /** Anthropic Messages API dialect. */
 class AnthropicClient : LlmClient {
 
-    override fun stream(provider: Provider, request: ChatRequest): Flow<StreamEvent> = flow {
+    override fun stream(endpoint: Endpoint, request: ChatRequest): Flow<StreamEvent> = flow {
+        val provider = endpoint.provider
         val url = "${provider.baseUrl.trimBaseUrl()}/v1/messages"
         val payload = buildPayload(request)
         val call = Http.withTimeout(provider.timeoutSeconds).newCall(
@@ -42,7 +43,7 @@ class AnthropicClient : LlmClient {
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
                 .header("anthropic-version", ANTHROPIC_VERSION)
-                .apply { if (provider.apiKey.isNotBlank()) header("x-api-key", provider.apiKey) }
+                .apply { if (endpoint.apiKey.isNotBlank()) header("x-api-key", endpoint.apiKey) }
                 .applyCustomHeaders(provider.headers)
                 .build()
         )
@@ -141,11 +142,12 @@ class AnthropicClient : LlmClient {
         }
     }.flowOn(Dispatchers.IO)
 
-    override suspend fun listModels(provider: Provider): List<String> = withContext(Dispatchers.IO) {
+    override suspend fun listModels(endpoint: Endpoint): List<String> = withContext(Dispatchers.IO) {
+        val provider = endpoint.provider
         val request = Request.Builder()
             .url("${provider.baseUrl.trimBaseUrl()}/v1/models?limit=200")
             .header("anthropic-version", ANTHROPIC_VERSION)
-            .apply { if (provider.apiKey.isNotBlank()) header("x-api-key", provider.apiKey) }
+            .apply { if (endpoint.apiKey.isNotBlank()) header("x-api-key", endpoint.apiKey) }
             .applyCustomHeaders(provider.headers)
             .build()
         try {
