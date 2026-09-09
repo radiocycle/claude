@@ -6,6 +6,11 @@ can call.
 
 Kotlin · Jetpack Compose · Material 3 Expressive · minSdk 26 · no backend of its own.
 
+The UI is built on material3 1.4.0, where the expressive design system is the baseline of
+`MaterialTheme` (the separate `MaterialExpressiveTheme` entry point is `internal` there), so the app
+themes through `MaterialTheme` with an expressive shape scale on top of a violet/coral/mint palette
+and Android 12+ dynamic color.
+
 ## What it does
 
 **One interface, three wire protocols.** `LlmClient` has three implementations — OpenAI Chat

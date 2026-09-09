@@ -40,8 +40,7 @@ class ChatEngine(
             var pendingCalls: List<ToolCall> = emptyList()
             var failed = false
 
-            suspend fun publish() = emit(produced + assistant)
-            publish()
+            emit(produced + assistant)
 
             val request = ChatRequest(
                 model = pinnedModel.orEmpty(),
@@ -93,12 +92,12 @@ class ChatEngine(
                         failed = true
                     }
                 }
-                publish()
+                emit(produced + assistant)
             }
 
             if (pendingCalls.isNotEmpty()) assistant = assistant.copy(toolCalls = pendingCalls)
             produced += assistant
-            publish()
+            emit(produced.toList())
 
             if (failed || pendingCalls.isEmpty()) break
 

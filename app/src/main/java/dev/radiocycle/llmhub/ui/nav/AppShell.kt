@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
@@ -37,7 +37,7 @@ import dev.radiocycle.llmhub.ui.providers.ProvidersViewModel
 import dev.radiocycle.llmhub.ui.settings.SettingsScreen
 
 private enum class Tab(val label: String, val icon: ImageVector) {
-    CHAT("Chat", Icons.Rounded.Chat),
+    CHAT("Chat", Icons.AutoMirrored.Rounded.Chat),
     PROVIDERS("Providers", Icons.Rounded.Hub),
     SETTINGS("Settings", Icons.Rounded.Settings),
 }

@@ -15,7 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Visibility
@@ -71,7 +71,7 @@ fun ProviderEditScreen(viewModel: ProvidersViewModel, onClose: () -> Unit) {
                     IconButton(onClick = {
                         viewModel.discardDraft()
                         onClose()
-                    }) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Back") }
+                    }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,

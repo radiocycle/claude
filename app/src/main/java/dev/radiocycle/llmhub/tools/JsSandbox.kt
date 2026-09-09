@@ -48,7 +48,6 @@ class JsSandbox(private val context: Context) {
                         view.settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = false
-                            databaseEnabled = false
                             allowFileAccess = false
                             allowContentAccess = false
                             blockNetworkLoads = true
