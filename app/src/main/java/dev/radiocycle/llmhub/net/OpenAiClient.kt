@@ -209,9 +209,16 @@ class OpenAiClient : LlmClient {
         put("temperature", request.temperature)
         put("max_tokens", request.maxTokens)
 
-        val effort = provider.reasoningEffort.value
-        if (effort != null) {
-            put("reasoning_effort", effort)
+        val effort = provider.effectiveEffortValue
+        if (!effort.isNullOrBlank()) {
+            val paramName = provider.effectiveEffortParam("reasoning_effort")
+            val intVal = effort.toIntOrNull()
+            val boolVal = effort.toBooleanStrictOrNull()
+            when {
+                intVal != null -> put(paramName, intVal)
+                boolVal != null -> put(paramName, boolVal)
+                else -> put(paramName, effort)
+            }
         }
 
         put("messages", buildMessages(request))
@@ -239,10 +246,15 @@ class OpenAiClient : LlmClient {
         put("temperature", request.temperature)
         put("max_output_tokens", request.maxTokens)
 
-        val effort = provider.reasoningEffort.value
-        if (effort != null) {
+        val effort = provider.effectiveEffortValue
+        if (!effort.isNullOrBlank()) {
+            val paramName = provider.effectiveEffortParam("effort")
             putJsonObject("reasoning") {
-                put("effort", effort)
+                val intVal = effort.toIntOrNull()
+                when {
+                    intVal != null -> put(paramName, intVal)
+                    else -> put(paramName, effort)
+                }
             }
         }
 

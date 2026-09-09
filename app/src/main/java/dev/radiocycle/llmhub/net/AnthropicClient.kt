@@ -173,7 +173,26 @@ class AnthropicClient : LlmClient {
         request.system?.takeIf { it.isNotBlank() }?.let { put("system", it) }
         put("messages", buildMessages(request))
 
-        if (provider.reasoningEffort != ReasoningEffort.DEFAULT) {
+        val customBudget = provider.customEffort.toIntOrNull()
+        if (provider.effortParameter.isNotBlank()) {
+            val customVal = provider.effectiveEffortValue
+            if (!customVal.isNullOrBlank()) {
+                val intVal = customVal.toIntOrNull()
+                if (intVal != null) put(provider.effortParameter.trim(), intVal)
+                else put(provider.effortParameter.trim(), customVal)
+            }
+            put("temperature", request.temperature.coerceIn(0f, 1f))
+        } else if (customBudget != null) {
+            if (customBudget <= 0) {
+                putJsonObject("thinking") { put("type", "disabled") }
+            } else {
+                putJsonObject("thinking") {
+                    put("type", "enabled")
+                    put("budget_tokens", customBudget)
+                }
+                put("temperature", 1.0f)
+            }
+        } else if (provider.reasoningEffort != ReasoningEffort.DEFAULT) {
             when (provider.reasoningEffort) {
                 ReasoningEffort.NONE -> putJsonObject("thinking") { put("type", "disabled") }
                 ReasoningEffort.LOW -> {

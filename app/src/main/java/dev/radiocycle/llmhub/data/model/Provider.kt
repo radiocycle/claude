@@ -86,6 +86,8 @@ data class Provider(
     val apiMode: ApiMode = ApiMode.OPENAI,
     val openAiMode: OpenAiMode = OpenAiMode.WIRE,
     val reasoningEffort: ReasoningEffort = ReasoningEffort.DEFAULT,
+    val effortParameter: String = "",
+    val customEffort: String = "",
     /** Base URL without the endpoint path, e.g. `https://api.openai.com/v1`. */
     val baseUrl: String = "",
     /** One or more API keys, separated by commas, semicolons or newlines. Rotated in order. */
@@ -120,6 +122,12 @@ data class Provider(
             ?: defaultModel.takeIf { it.isNotBlank() }
             ?: models.firstOrNull()
             ?: ""
+
+    val effectiveEffortValue: String?
+        get() = customEffort.trim().takeIf { it.isNotEmpty() } ?: reasoningEffort.value
+
+    fun effectiveEffortParam(defaultName: String = "reasoning_effort"): String =
+        effortParameter.trim().ifEmpty { defaultName }
 
     companion object {
         const val PRESET_LOCAL = "local"

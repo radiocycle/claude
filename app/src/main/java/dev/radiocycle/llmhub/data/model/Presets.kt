@@ -13,12 +13,16 @@ data class ProviderPreset(
     val needsKey: Boolean = true,
     val openAiMode: OpenAiMode = OpenAiMode.WIRE,
     val reasoningEffort: ReasoningEffort = ReasoningEffort.DEFAULT,
+    val effortParameter: String = "",
+    val customEffort: String = "",
 ) {
     fun toProvider(priority: Int): Provider = Provider(
         name = name,
         apiMode = apiMode,
         openAiMode = openAiMode,
         reasoningEffort = reasoningEffort,
+        effortParameter = effortParameter,
+        customEffort = customEffort,
         baseUrl = baseUrl,
         models = models,
         defaultModel = defaultModel,

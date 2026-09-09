@@ -340,9 +340,14 @@ private fun ProviderCard(
                             } else {
                                 append(provider.apiMode.label)
                             }
-                            if (provider.reasoningEffort != ReasoningEffort.DEFAULT) {
-                                append(" · effort: ")
-                                append(provider.reasoningEffort.label.lowercase())
+                            val effortVal = provider.effectiveEffortValue
+                            if (!effortVal.isNullOrBlank()) {
+                                append(" · ")
+                                if (provider.effortParameter.isNotBlank()) {
+                                    append("${provider.effortParameter}: $effortVal")
+                                } else {
+                                    append("effort: $effortVal")
+                                }
                             }
                             append(" · ")
                             append(provider.baseUrl.ifBlank { "no base URL" })

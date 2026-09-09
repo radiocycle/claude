@@ -378,6 +378,38 @@ fun ProviderEditScreen(viewModel: ProvidersViewModel, onClose: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                val defaultParam = when (provider.apiMode) {
+                    ApiMode.OPENAI -> if (provider.openAiMode == OpenAiMode.WIRE) "reasoning_effort" else "effort"
+                    ApiMode.ANTHROPIC -> "budget_tokens"
+                    ApiMode.GOOGLE -> "thinkingBudget"
+                }
+                OutlinedTextField(
+                    value = provider.effortParameter,
+                    onValueChange = { param -> viewModel.editDraft { it.copy(effortParameter = param) } },
+                    label = { Text("Param name") },
+                    placeholder = { Text(defaultParam) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = provider.customEffort,
+                    onValueChange = { custom -> viewModel.editDraft { it.copy(customEffort = custom) } },
+                    label = { Text("Custom value") },
+                    placeholder = { Text(provider.reasoningEffort.value ?: "override") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                text = "Override variable name (e.g. reasoning_effort, effort, thinking_budget) or value sent to the endpoint.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = provider.weight.toString(),

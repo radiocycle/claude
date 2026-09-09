@@ -234,7 +234,7 @@
 
     listitem: function (token) {
       var cls = token.task ? ' class="task"' : '';
-      return '<li' + cls + '>' + this.parser.parseInline(token.tokens || []) + '</li>\n';
+      return '<li' + cls + '>' + this.parser.parse(token.tokens || []) + '</li>\n';
     }
   };
 
@@ -278,7 +278,8 @@
       try {
         html = marked.parse(markdown == null ? '' : String(markdown));
       } catch (e) {
-        html = '<p class="math-error">' + escapeHtml(String(e && e.message || e)) + '</p>';
+        console.error('marked parse error:', e);
+        html = '<pre style="white-space:pre-wrap;word-break:break-word;">' + escapeHtml(String(markdown || '')) + '</pre>';
       }
       content.innerHTML = html;
       afterPaint(settle);

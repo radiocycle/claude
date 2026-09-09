@@ -162,12 +162,17 @@ class GoogleClient : LlmClient {
         putJsonObject("generationConfig") {
             put("temperature", request.temperature)
             put("maxOutputTokens", request.maxTokens)
-            when (provider.reasoningEffort) {
-                ReasoningEffort.NONE -> putJsonObject("thinkingConfig") { put("thinkingBudget", 0) }
-                ReasoningEffort.LOW -> putJsonObject("thinkingConfig") { put("thinkingBudget", 1024) }
-                ReasoningEffort.MEDIUM -> putJsonObject("thinkingConfig") { put("thinkingBudget", 2048) }
-                ReasoningEffort.HIGH -> putJsonObject("thinkingConfig") { put("thinkingBudget", 4096) }
-                ReasoningEffort.DEFAULT -> Unit
+            val customBudget = provider.customEffort.toIntOrNull()
+            if (customBudget != null) {
+                putJsonObject("thinkingConfig") { put("thinkingBudget", customBudget) }
+            } else {
+                when (provider.reasoningEffort) {
+                    ReasoningEffort.NONE -> putJsonObject("thinkingConfig") { put("thinkingBudget", 0) }
+                    ReasoningEffort.LOW -> putJsonObject("thinkingConfig") { put("thinkingBudget", 1024) }
+                    ReasoningEffort.MEDIUM -> putJsonObject("thinkingConfig") { put("thinkingBudget", 2048) }
+                    ReasoningEffort.HIGH -> putJsonObject("thinkingConfig") { put("thinkingBudget", 4096) }
+                    ReasoningEffort.DEFAULT -> Unit
+                }
             }
         }
         if (request.tools.isNotEmpty()) {
