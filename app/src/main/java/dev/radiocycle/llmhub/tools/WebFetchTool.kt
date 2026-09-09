@@ -94,7 +94,11 @@ class WebFetchTool(private val settings: SettingsRepository) : AgentTool {
             .post(payload.toString().toRequestBody(JSON))
             .header("Content-Type", "application/json")
             .apply {
-                if (apiKey.isNotBlank()) header("Authorization", "Bearer ${apiKey.trim()}")
+                if (apiKey.isNotBlank()) {
+                    val key = apiKey.trim()
+                    header("Authorization", "Bearer $key")
+                    header("x-api-key", key)
+                }
             }
             .build()
 
